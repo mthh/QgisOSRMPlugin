@@ -50,7 +50,7 @@ PY_FILES = \
 
 # UI_FILES = osrm_dialog_base.ui
 
-EXTRAS = metadata.txt icon.png
+EXTRAS = metadata.txt img/icon.png
 
 EXTRA_DIRS =
 

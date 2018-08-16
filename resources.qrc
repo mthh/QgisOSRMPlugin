@@ -1,5 +1,7 @@
 <RCC>
     <qresource prefix="/plugins/osrm" >
-        <file>icon.png</file>
+        <file>img/icon.png</file>
+        <file>img/icon_access.png</file>
+        <file>img/icon_table.png</file>
     </qresource>
 </RCC>

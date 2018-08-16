@@ -50,6 +50,7 @@ class OsrmTools:
         """
         # Save reference to the QGIS interface
         self.iface = iface
+        self.canvas = iface.mapCanvas()
         # initialize plugin directory
         self.plugin_dir = os.path.dirname(__file__)
         # initialize locale
@@ -67,7 +68,11 @@ class OsrmTools:
                 QCoreApplication.installTranslator(self.translator)
 
         # Create the dialog (after translation) and keep reference
-        # self.dlg = OsrmToolsDialog()
+        self.dlg_route = OsrmRouteDialog()
+        self.dlg_access = OsrmAccessDialog()
+        self.dlg_table = OsrmTableDialog()
+        self.dlg_tsp = OsrmTspDialog()
+        self.dlg_batchroute = OsrmBatchRouteDialog()
 
         # Declare instance attributes
         self.actions = []
@@ -168,13 +173,42 @@ class OsrmTools:
     def initGui(self):
         """Create the menu entries and toolbar icons inside the QGIS GUI."""
 
-        icon_path = ':/plugins/osrm/icon.png'
         self.add_action(
-            icon_path,
-            text=self.tr(u'Osrm'),
-            callback=self.run,
-            parent=self.iface.mainWindow())
+            ':/plugins/osrm/img/icon.png',
+            text=self.tr(u'Find a route with OSRM'),
+            callback=self.run_route,
+            parent=self.iface.mainWindow(),
+            )
 
+        self.add_action(
+            ':/plugins/osrm/img/icon_table.png',
+            text=self.tr(u'Get a time matrix with OSRM'),
+            callback=self.run_table,
+            parent=self.iface.mainWindow(),
+            )
+
+        self.add_action(
+            ':/plugins/osrm/img/icon_access.png',
+            text=self.tr(u'Make accessibility isochrones with OSRM'),
+            callback=self.run_accessibility,
+            parent=self.iface.mainWindow(),
+            )
+
+        self.add_action(
+            None,
+            text=self.tr(u'Solve the Traveling Salesman Problem with OSRM'),
+            callback=self.run_tsp,
+            parent=self.iface.mainWindow(),
+            add_to_toolbar=False,
+            )
+
+        self.add_action(
+            None,
+            text=self.tr(u'Export many routes from OSRM'),
+            callback=self.run_batchroute,
+            parent=self.iface.mainWindow(),
+            add_to_toolbar=False,
+            )
 
     def unload(self):
         """Removes the plugin menu item and icon from QGIS GUI."""
@@ -186,13 +220,78 @@ class OsrmTools:
         # remove the toolbar
         del self.toolbar
 
-
-    def run(self):
+    def run_route(self):
         """Run method that performs all the real work"""
         # show the dialog
-        self.dlg.show()
+        self.dlg_route.show()
+
+        QObject.connect(
+            self.dlg_route.originEmit,
+            SIGNAL("canvasClicked(const QgsPoint&, Qt::MouseButton)"),
+            self.dlg_route.store_origin)
+        QObject.connect(
+            self.dlg_route.intermediateEmit,
+            SIGNAL("canvasClicked(const QgsPoint&, Qt::MouseButton)"),
+            self.dlg_route.store_intermediate)
+        QObject.connect(
+            self.dlg_route.destinationEmit,
+            SIGNAL("canvasClicked(const QgsPoint&, Qt::MouseButton)"),
+            self.dlg_route.store_destination)
+        self.dlg_route.pushButtonOrigin.clicked.connect(self.get_origin)
+        self.dlg_route.pushButtonIntermediate.clicked.connect(self.get_intermediate)
+        self.dlg_route.pushButtonDest.clicked.connect(self.get_destination)
+        self.dlg_route.pushButton_about.clicked.connect(self.dlg_route.print_about)
+
         # Run the dialog event loop
-        result = self.dlg.exec_()
+        result = self.dlg_route.exec_()
+        # See if OK was pressed
+        if result:
+            # Do something useful here - delete the line containing pass and
+            # substitute with your code.
+            pass
+
+    def run_table(self):
+        """Run method that performs all the real work"""
+        # show the dialog
+        self.dlg_table.show()
+        # Run the dialog event loop
+        result = self.dlg_table.exec_()
+        # See if OK was pressed
+        if result:
+            # Do something useful here - delete the line containing pass and
+            # substitute with your code.
+            pass
+
+    def run_accessibility(self):
+        """Run method that performs all the real work"""
+        # show the dialog
+        self.dlg_access.show()
+        # Run the dialog event loop
+        result = self.dlg_access.exec_()
+        # See if OK was pressed
+        if result:
+            # Do something useful here - delete the line containing pass and
+            # substitute with your code.
+            pass
+
+    def run_tsp(self):
+        """Run method that performs all the real work"""
+        # show the dialog
+        self.dlg_tsp.show()
+        # Run the dialog event loop
+        result = self.dlg_tsp.exec_()
+        # See if OK was pressed
+        if result:
+            # Do something useful here - delete the line containing pass and
+            # substitute with your code.
+            pass
+
+    def run_batchroute(self):
+        """Run method that performs all the real work"""
+        # show the dialog
+        self.dlg_batchroute.show()
+        # Run the dialog event loop
+        result = self.dlg_batchroute.exec_()
         # See if OK was pressed
         if result:
             # Do something useful here - delete the line containing pass and
