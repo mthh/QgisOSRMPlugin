@@ -22,6 +22,19 @@
  ***************************************************************************/
 """
 from PyQt5 import QtWidgets
+from PyQt5.QtNetwork import QNetworkReply
+from qgis.core import (
+    QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsFeature,
+    QgsLogger, QgsMapLayerProxyModel, QgsProject,
+    QgsSingleSymbolRenderer, QgsVectorLayer)
+from qgis.gui import QgsMapToolEmitPoint
+from re import match
+import json
+
+from .utils import (
+    BaseOsrm, check_host, check_profile_name, decode_geom,
+    encode_to_polyline, get_coords_ids, prepare_route_symbol,
+    save_dialog)
 
 from .osrm_route_dialogUi import Ui_OsrmRouteDialog
 from .osrm_table_dialogUi import Ui_OsrmTableDialog
@@ -29,58 +42,360 @@ from .osrm_access_dialogUi import Ui_OsrmAccessDialog
 from .osrm_tsp_dialogUi import Ui_OsrmTspDialog
 from .osrm_batch_route_dialogUi import Ui_OsrmBatchRouteDialog
 
-class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog):
-    def __init__(self, parent=None):
+
+class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
+    def __init__(self, iface, parent=None):
         """Constructor."""
         super(OsrmRouteDialog, self).__init__(parent)
-        # Set up the user interface from Designer.
-        # After setupUI you can access any designer object by doing
-        # self.<objectname>, and you can use autoconnect slots - see
-        # http://qt-project.org/doc/qt-4.8/designer-using-a-ui-file.html
-        # #widgets-and-dialogs-with-auto-connect
         self.setupUi(self)
+        self.iface = iface
+        self.canvas = iface.mapCanvas()
+        self.originEmit = QgsMapToolEmitPoint(self.canvas)
+        self.intermediateEmit = QgsMapToolEmitPoint(self.canvas)
+        self.destinationEmit = QgsMapToolEmitPoint(self.canvas)
+        self.nb_route = 0
+        self.intermediate = []
+        self.pushButtonTryIt.clicked.connect(self.get_route)
+        self.pushButtonReverse.clicked.connect(self.reverse_OD)
+        self.pushButtonClear.clicked.connect(self.clear_all_single)
 
-class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog):
-    def __init__(self, parent=None):
+    def store_intermediate(self, point):
+        if '4326' not in self.canvas.mapSettings().destinationCrs().authid():
+            crsSrc = self.canvas.mapSettings().destinationCrs()
+            xform = QgsCoordinateTransform(
+                crsSrc,
+                QgsCoordinateReferenceSystem(4326),
+                QgsProject.instance())
+            point = xform.transform(point)
+        self.intermediate.append(tuple(map(lambda x: round(x, 6), point)))
+        self.canvas.unsetMapTool(self.intermediateEmit)
+        self.lineEdit_xyI.setText(str(self.intermediate)[1:-1])
+
+    def store_destination(self, point):
+        if '4326' not in self.canvas.mapSettings().destinationCrs().authid():
+            crsSrc = self.canvas.mapSettings().destinationCrs()
+            xform = QgsCoordinateTransform(
+                crsSrc,
+                QgsCoordinateReferenceSystem(4326),
+                QgsProject.instance())
+            point = xform.transform(point)
+        self.destination = point
+        self.canvas.unsetMapTool(self.destinationEmit)
+        self.lineEdit_xyD.setText(
+            str(tuple(map(lambda x: round(x, 6), point))))
+
+    def get_alternatives(self, provider):
+        """
+        Fetch the geometry of alternatives roads if requested
+        """
+        for i, alt_geom in enumerate(self.parsed['routes'][1:]):
+            decoded_alt_line = decode_geom(alt_geom["geometry"])
+            fet = QgsFeature()
+            fet.setGeometry(decoded_alt_line)
+            fet.setAttributes([
+                i + 1,
+                alt_geom["duration"],
+                alt_geom["distance"]
+                ])
+            provider.addFeatures([fet])
+
+    def reverse_OD(self):
+        try:
+            tmp = self.lineEdit_xyO.text()
+            tmp1 = self.lineEdit_xyD.text()
+            self.lineEdit_xyD.setText(str(tmp))
+            self.lineEdit_xyO.setText(str(tmp1))
+        except Exception as err:
+            print(err)
+
+    def clear_all_single(self):
+        self.lineEdit_xyO.setText('')
+        self.lineEdit_xyD.setText('')
+        self.lineEdit_xyI.setText('')
+        self.intermediate = []
+        for layer in QgsProject.instance().mapLayers():
+            if 'route_osrm' in layer or 'markers_osrm' in layer:
+                    # or 'instruction_osrm' in layer \
+                QgsProject.instance().removeMapLayer(layer)
+        self.nb_route = 0
+
+    def get_route(self):
+        """
+        Main method to prepare the request and display the result on the
+        QGIS canvas.
+        """
+        try:
+            self.host = check_host(self.lineEdit_host.text())
+            profile = check_profile_name(self.lineEdit_profileName.text())
+        except (ValueError, AssertionError) as err:
+            print(err)
+            self.iface.messageBar().pushMessage(
+                "Error",
+                "Please provide a valid non-empty URL and profile name",
+                duration=10)
+            return
+
+        origin = self.lineEdit_xyO.text()
+        interm = self.lineEdit_xyI.text()
+        destination = self.lineEdit_xyD.text()
+
+        try:
+            assert match('^[^a-zA-Z]+$', origin) \
+                and 46 > len(origin) > 4
+            assert match('^[^a-zA-Z]+$', destination) \
+                and 46 > len(destination) > 4
+            xo, yo = eval(origin)
+            xd, yd = eval(destination)
+        except:
+            self.iface.messageBar().pushMessage(
+                "Error", "Invalid coordinates !", duration=10)
+            return -1
+
+        if interm:
+            try:
+                assert match('^[^a-zA-Z]+$', interm) \
+                    and 150 > len(interm) > 4
+                interm = eval(''.join(['[', interm, ']']))
+                tmp = ';'.join(
+                    ['{},{}'.format(xi, yi) for xi, yi in interm])
+                url = ''.join([
+                    "http://", self.host, "/route/", profile, "/",
+                    "{},{};".format(xo, yo), tmp, ";{},{}".format(xd, yd),
+                    "?overview=full&alternatives={}".format(
+                        str(self.checkBox_alternative.isChecked()).lower())])
+            except:
+                self.iface.messageBar().pushMessage(
+                    "Error", "Invalid intemediates coordinates", duration=10)
+        else:
+            url = ''.join([
+                "http://", self.host, "/route/", profile, "/",
+                "polyline(", encode_to_polyline([(yo, xo), (yd, xd)]), ")",
+                "?overview=full&alternatives={}"
+                .format(str(self.checkBox_alternative.isChecked()).lower())])
+
+        print(url)
+        self.query_url(url, self.query_done)
+
+    def query_done(self):
+        error = self.reply.error()
+        if error == QNetworkReply.NoError:
+            response_text = self.reply.readAll().data().decode('utf-8')
+            QgsLogger.debug('Response: {}'.format(response_text))
+            try:
+                self.parsed = json.loads(response_text)
+            except ValueError:
+                return
+            finally:
+                self.reply.deleteLater()
+                self.reply = None
+                # self.message.emit(self.tr('The service did not reply properly. Please check service definition.'), QgsMessageBar.WARNING)
+        else:
+            # error_message = self.get_error_message(error)
+            # self.message.emit(error_message, QgsMessageBar.WARNING)
+            self.reply.deleteLater()
+            self.reply = None
+            return
+        print(self.parsed)
+        try:
+            assert "code" in self.parsed
+        except Exception as err:
+            self.display_error(err, 1)
+            return
+
+        if 'Ok' not in self.parsed['code']:
+            self.display_error(self.parsed['code'], 1)
+            return
+
+        try:
+            enc_line = self.parsed['routes'][0]["geometry"]
+            line_geom = decode_geom(enc_line)
+        except KeyError:
+            # self.iface.messageBar().pushMessage(
+            #     "Error",
+            #     "No route found between {} and {}".format(origin, destination),
+            #     duration=5)
+            return
+
+        self.nb_route += 1
+        osrm_route_layer = QgsVectorLayer(
+            "Linestring?crs=epsg:4326&field=id:integer"
+            "&field=total_time:integer(20)&field=distance:integer(20)",
+            "route_osrm{}".format(self.nb_route), "memory")
+        my_symb = prepare_route_symbol(self.nb_route)
+        osrm_route_layer.setRenderer(QgsSingleSymbolRenderer(my_symb))
+        provider = osrm_route_layer.dataProvider()
+        fet = QgsFeature()
+        fet.setGeometry(line_geom)
+        fet.setAttributes([0, self.parsed['routes'][0]['duration'],
+                           self.parsed['routes'][0]['distance']])
+        provider.addFeatures([fet])
+        # OD_layer = self.make_OD_markers(self.nb_route, xo, yo, xd, yd, interm)
+        # QgsProject.instance().addMapLayer(OD_layer)
+
+        osrm_route_layer.updateExtents()
+        QgsProject.instance().addMapLayer(osrm_route_layer)
+        self.iface.setActiveLayer(osrm_route_layer)
+        self.iface.zoomToActiveLayer()
+        # put_on_top(OD_layer.id(), osrm_route_layer.id())
+#        if self.checkBox_instruction.isChecked():
+#            pr_instruct, instruct_layer = self.prep_instruction()
+#            QgsMapLayerRegistry.instance().addMapLayer(instruct_layer)
+#            self.iface.setActiveLayer(instruct_layer)
+
+        if self.checkBox_alternative.isChecked() \
+                and 'alternative_geometries' in self.parsed:
+            self.nb_alternative = len(self.parsed['routes'] - 1)
+            self.get_alternatives(provider)
+#            if self.dlg.checkBox_instruction.isChecked():
+#                for i in range(self.nb_alternative):
+#                    pr_instruct, instruct_layer = \
+#                       self.prep_instruction(
+#                           i + 1, pr_instruct, instruct_layer)
+        return
+
+
+class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog, BaseOsrm):
+    def __init__(self, iface, parent=None):
         """Constructor."""
         super(OsrmTableDialog, self).__init__(parent)
-        # Set up the user interface from Designer.
-        # After setupUI you can access any designer object by doing
-        # self.<objectname>, and you can use autoconnect slots - see
-        # http://qt-project.org/doc/qt-4.8/designer-using-a-ui-file.html
-        # #widgets-and-dialogs-with-auto-connect
         self.setupUi(self)
+        self.iface = iface
+        self.encoding = "System"
+        self.pushButton_fetch.setDisabled(True)
+        self.comboBox_layer.setFilters(QgsMapLayerProxyModel.PointLayer)
+        self.comboBox_layer.layerChanged.connect(
+            lambda x: self.comboBox_idfield.setLayer(x)
+            )
+        self.lineEdit_output.textChanged.connect(
+            lambda x: self.pushButton_fetch.setEnabled(True)
+            if '.csv' in x else self.pushButton_fetch.setDisabled(True)
+            )
+        self.comboBox_layer_2.setFilters(QgsMapLayerProxyModel.PointLayer)
+        self.comboBox_layer_2.layerChanged.connect(
+            lambda x: self.comboBox_idfield_2.setLayer(x)
+            )
+        self.pushButton_browse.clicked.connect(self.output_dialog)
+        self.pushButton_fetch.clicked.connect(self.get_table)
+
+    def output_dialog(self):
+        self.lineEdit_output.clear()
+        self.filename, self.encoding = save_dialog()
+        if self.filename is None:
+            return
+        self.lineEdit_output.setText(self.filename)
+
+    def get_table(self):
+        """
+        Main method to prepare the query and fecth the table to a .csv file
+        """
+        try:
+            self.host = check_host(self.lineEdit_host.text())
+            profile = check_profile_name(self.lineEdit_profileName.text())
+        except:
+            self.iface.messageBar().pushMessage(
+                "Error", "Please provide valid non-empty URL and profile name",
+                duration=10)
+            return
+
+        self.filename = self.lineEdit_output.text()
+
+        s_layer = self.comboBox_layer.currentLayer()
+        d_layer = self.comboBox_layer_2.currentLayer() \
+            if self.comboBox_layer_2.currentLayer() != s_layer else None
+
+        coords_src, ids_src = \
+            get_coords_ids(s_layer, self.comboBox_idfield.currentField())
+
+        coords_dest, ids_dest = \
+            get_coords_ids(d_layer, self.comboBox_idfield_2.currentField()) \
+            if d_layer else (None, None)
+
+        url = ''.join(["http://", self.host, '/table/', profile, '/'])
+
+        try:
+            table, new_src_coords, new_dest_coords = \
+                    fetch_table(url, coords_src, coords_dest)
+        except ValueError as err:
+            print(err)
+            self.display_error(err, 1)
+            return
+        except Exception as er:
+            print(er)
+            self.display_error(er, 1)
+            return
+
+        # Convert the matrix in minutes if needed :
+        if self.checkBox_minutes.isChecked():
+            table = (table / 60.0).round(2)
+
+        # Replace the value corresponding to a not-found connection :
+        if self.checkBox_empty_val.isChecked():
+            if self.checkBox_minutes.isChecked():
+                table[table == 3579139.4] = np.NaN
+            else:
+                table[table == 2147483647] = np.NaN
+
+        # Fetch the default encoding if selected :
+        if self.encoding == "System":
+            self.encoding = sys.getdefaultencoding()
+
+        # Write the result in csv :
+        try:
+            out_file = codecs_open(self.filename, 'w', encoding=self.encoding)
+            writer = csv.writer(out_file, lineterminator='\n')
+            if self.checkBox_flatten.isChecked():
+                table = table.ravel()
+                if d_layer:
+                    idsx = [(i, j) for i in ids_src for j in ids_dest]
+                else:
+                    idsx = [(i, j) for i in ids_src for j in ids_src]
+                writer.writerow([u'Origin', u'Destination', u'Time'])
+                writer.writerows([
+                    [idsx[i][0], idsx[i][1], table[i]]
+                    for i in xrange(len(idsx))
+                    ])
+            else:
+                if d_layer:
+                    writer.writerow([u''] + ids_dest)
+                    writer.writerows(
+                        [[ids_src[_id]] + line
+                         for _id, line in enumerate(table.tolist())])
+                else:
+                    writer.writerow([u''] + ids_src)
+                    writer.writerows(
+                        [[ids_src[_id]] + line
+                         for _id, line in enumerate(table.tolist())])
+            out_file.close()
+            QtWidgets.QMessageBox.information(
+                self.iface.mainWindow(), 'Done',
+                "OSRM table saved in {}".format(self.filename))
+        except Exception as err:
+            print(err)
+            QtWidgets.QMessageBox.information(
+                self.iface.mainWindow(), 'Error',
+                "Something went wrong...(See Qgis log for traceback)")
+            QgsMessageLog.logMessage(
+                'OSRM-plugin error report :\n {}'.format(err),
+                level=QgsMessageLog.WARNING)
+
+
 
 class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog):
     def __init__(self, parent=None):
         """Constructor."""
         super(OsrmAccessDialog, self).__init__(parent)
-        # Set up the user interface from Designer.
-        # After setupUI you can access any designer object by doing
-        # self.<objectname>, and you can use autoconnect slots - see
-        # http://qt-project.org/doc/qt-4.8/designer-using-a-ui-file.html
-        # #widgets-and-dialogs-with-auto-connect
         self.setupUi(self)
+
 
 class OsrmTspDialog(QtWidgets.QDialog, Ui_OsrmTspDialog):
     def __init__(self, parent=None):
         """Constructor."""
         super(OsrmTspDialog, self).__init__(parent)
-        # Set up the user interface from Designer.
-        # After setupUI you can access any designer object by doing
-        # self.<objectname>, and you can use autoconnect slots - see
-        # http://qt-project.org/doc/qt-4.8/designer-using-a-ui-file.html
-        # #widgets-and-dialogs-with-auto-connect
         self.setupUi(self)
+
 
 class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog):
     def __init__(self, parent=None):
         """Constructor."""
         super(OsrmBatchRouteDialog, self).__init__(parent)
-        # Set up the user interface from Designer.
-        # After setupUI you can access any designer object by doing
-        # self.<objectname>, and you can use autoconnect slots - see
-        # http://qt-project.org/doc/qt-4.8/designer-using-a-ui-file.html
-        # #widgets-and-dialogs-with-auto-connect
         self.setupUi(self)
-

@@ -21,7 +21,9 @@
  *                                                                         *
  ***************************************************************************/
 """
-from PyQt5.QtCore import QSettings, QTranslator, qVersion, QCoreApplication
+import os.path
+from PyQt5.QtCore import (
+    QSettings, QTranslator, qVersion, QCoreApplication, QObject)
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QAction
 
@@ -34,7 +36,6 @@ from .osrm_dialog import (
     OsrmAccessDialog,
     OsrmTspDialog,
     OsrmBatchRouteDialog)
-import os.path
 
 
 class OsrmTools:
@@ -68,9 +69,9 @@ class OsrmTools:
                 QCoreApplication.installTranslator(self.translator)
 
         # Create the dialog (after translation) and keep reference
-        self.dlg_route = OsrmRouteDialog()
+        self.dlg_route = OsrmRouteDialog(self.iface)
         self.dlg_access = OsrmAccessDialog()
-        self.dlg_table = OsrmTableDialog()
+        self.dlg_table = OsrmTableDialog(self.iface)
         self.dlg_tsp = OsrmTspDialog()
         self.dlg_batchroute = OsrmBatchRouteDialog()
 
@@ -224,23 +225,20 @@ class OsrmTools:
         """Run method that performs all the real work"""
         # show the dialog
         self.dlg_route.show()
-
-        QObject.connect(
-            self.dlg_route.originEmit,
-            SIGNAL("canvasClicked(const QgsPoint&, Qt::MouseButton)"),
+        self.dlg_route.originEmit.canvasClicked.connect(
             self.dlg_route.store_origin)
-        QObject.connect(
-            self.dlg_route.intermediateEmit,
-            SIGNAL("canvasClicked(const QgsPoint&, Qt::MouseButton)"),
+        self.dlg_route.intermediateEmit.canvasClicked.connect(
             self.dlg_route.store_intermediate)
-        QObject.connect(
-            self.dlg_route.destinationEmit,
-            SIGNAL("canvasClicked(const QgsPoint&, Qt::MouseButton)"),
+        self.dlg_route.destinationEmit.canvasClicked.connect(
             self.dlg_route.store_destination)
-        self.dlg_route.pushButtonOrigin.clicked.connect(self.get_origin)
-        self.dlg_route.pushButtonIntermediate.clicked.connect(self.get_intermediate)
-        self.dlg_route.pushButtonDest.clicked.connect(self.get_destination)
-        self.dlg_route.pushButton_about.clicked.connect(self.dlg_route.print_about)
+        self.dlg_route.pushButtonOrigin.clicked.connect(
+            lambda _: self.canvas.setMapTool(self.dlg_route.originEmit))
+        self.dlg_route.pushButtonIntermediate.clicked.connect(
+            lambda _: self.canvas.setMapTool(self.dlg_route.intermediateEmit))
+        self.dlg_route.pushButtonDest.clicked.connect(
+            lambda _: self.canvas.setMapTool(self.dlg_route.destinationEmit))
+        self.dlg_route.pushButton_about.clicked.connect(
+            self.dlg_route.print_about)
 
         # Run the dialog event loop
         result = self.dlg_route.exec_()

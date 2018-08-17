@@ -38,15 +38,20 @@ LRELEASE = lrelease
 # translation
 SOURCES = \
 	__init__.py \
-	osrm.py osrm_dialog.py
+	osrm.py osrm_dialog.py utils.py
 
 PLUGINNAME = osrm
 
 PY_FILES = \
 	__init__.py \
-	osrm.py osrm_dialog.py osrm_batch_route_dialogUi.py \
-    osrm_access_dialogUi.py osrm_route_dialogUi.py osrm_tsp_dialogUi.py \
-    osrm_table_dialogUi.py \
+	osrm.py \
+	utils.py \
+	osrm_dialog.py \
+	osrm_batch_route_dialogUi.py \
+  osrm_access_dialogUi.py \
+	osrm_route_dialogUi.py \
+	osrm_tsp_dialogUi.py \
+  osrm_table_dialogUi.py
 
 # UI_FILES = osrm_dialog_base.ui
 
