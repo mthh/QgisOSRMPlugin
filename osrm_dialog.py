@@ -30,7 +30,7 @@ from re import match
 from PyQt5 import QtWidgets
 from PyQt5.QtNetwork import QNetworkReply
 from qgis.core import (
-    QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsFeature,
+    Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsFeature,
     QgsLogger, QgsMapLayerProxyModel, QgsMessageLog, QgsProject,
     QgsSingleSymbolRenderer, QgsVectorLayer)
 from qgis.gui import QgsMapToolEmitPoint
@@ -178,34 +178,34 @@ class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
                 "?overview=full&alternatives={}"
                 .format(str(self.checkBox_alternative.isChecked()).lower())])
 
-        print(url)
         self.query_url(url, self.query_done)
 
     def query_done(self):
         error = self.reply.error()
-        if error == QNetworkReply.NoError:
-            response_text = self.reply.readAll().data().decode('utf-8')
-            QgsLogger.debug('Response: {}'.format(response_text))
-            try:
-                self.parsed = json.loads(response_text)
-            except ValueError:
-                return
-            finally:
-                self.reply.deleteLater()
-                self.reply = None
-                # self.message.emit(self.tr('The service did not reply properly. Please check service definition.'), QgsMessageBar.WARNING)
-        else:
+        if error != QNetworkReply.NoError:
             # error_message = self.get_error_message(error)
-            # self.message.emit(error_message, QgsMessageBar.WARNING)
+            # self.message.emit(error_message, Qgis.WARNING)
+            QgsMessageLog.logMessage(
+                'OSRM-plugin error report :\n {}'.format(error),
+                level=Qgis.WARNING)
             self.reply.deleteLater()
             self.reply = None
             return
-        print(self.parsed)
+
+        response_text = self.reply.readAll().data().decode('utf-8')
+        QgsLogger.debug('Response: {}'.format(response_text))
         try:
-            assert "code" in self.parsed
+            self.parsed = json.loads(response_text)
+            assert 'code' in self.parsed
+        except ValueError as er:
+            self.display_error(er, 1)
+            return
         except Exception as err:
             self.display_error(err, 1)
             return
+        finally:
+            self.reply.deleteLater()
+            self.reply = None
 
         if 'Ok' not in self.parsed['code']:
             self.display_error(self.parsed['code'], 1)
@@ -215,10 +215,10 @@ class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
             enc_line = self.parsed['routes'][0]["geometry"]
             line_geom = decode_geom(enc_line)
         except KeyError:
-            # self.iface.messageBar().pushMessage(
-            #     "Error",
-            #     "No route found between {} and {}".format(origin, destination),
-            #     duration=5)
+            self.iface.messageBar().pushMessage(
+                "Error",
+                "No route found between selected origin/destination",
+                duration=5)
             return
 
         self.nb_route += 1
@@ -307,7 +307,9 @@ class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog, BaseOsrm):
         s_layer = self.comboBox_layer.currentLayer()
         d_layer = self.comboBox_layer_2.currentLayer() \
             if self.comboBox_layer_2.currentLayer() != s_layer else None
+
         self.d_layer = d_layer
+
         coords_src, self.ids_src = \
             get_coords_ids(s_layer, self.comboBox_idfield.currentField())
 
@@ -335,41 +337,38 @@ class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog, BaseOsrm):
                 '&destinations=',
                 ';'.join([str(j) for j in range(src_end, dest_end)])
                 ])
+
         self.query_url(query, self.query_done)
 
     def query_done(self):
         error = self.reply.error()
-        if error == QNetworkReply.NoError:
-            response_text = self.reply.readAll().data().decode('utf-8')
-            QgsLogger.debug('Response: {}'.format(response_text))
-            try:
-                self.parsed = json.loads(response_text)
-            except ValueError:
-                return
-            finally:
-                self.reply.deleteLater()
-                self.reply = None
-        else:
+        if error != QNetworkReply.NoError:
             QgsLogger.debug('Error: {}'.format(error))
             self.display_error(error, 1)
             self.reply.deleteLater()
             self.reply = None
             return
 
+        response_text = self.reply.readAll().data().decode('utf-8')
+        QgsLogger.debug('Response: {}'.format(response_text))
         try:
+            self.parsed = json.loads(response_text)
             assert "code" in self.parsed
+        except ValueError as er:
+            self.display_error(er, 1)
+            return
         except Exception as err:
             self.display_error(err, 1)
             return
+        finally:
+            self.reply.deleteLater()
+            self.reply = None
 
         if 'Ok' not in self.parsed['code']:
             self.display_error(self.parsed['code'], 1)
             return
 
         table = np.array(self.parsed["durations"], dtype=float)
-        # new_src_coords = [ft["location"] for ft in self.parsed["sources"]]
-        # new_dest_coords = None if not coords_dest \
-        #     else [ft["location"] for ft in self.parsed["destinations"]]
 
         # Convert the matrix in minutes if needed :
         if self.checkBox_minutes.isChecked():
@@ -399,7 +398,7 @@ class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog, BaseOsrm):
                     writer.writerow([u'Origin', u'Destination', u'Time'])
                     writer.writerows([
                         [idsx[i][0], idsx[i][1], table[i]]
-                        for i in xrange(len(idsx))
+                        for i in range(len(idsx))
                         ])
                 else:
                     if self.d_layer:
@@ -422,7 +421,7 @@ class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog, BaseOsrm):
                 "Something went wrong...(See Qgis log for traceback)")
             QgsMessageLog.logMessage(
                 'OSRM-plugin error report :\n {}'.format(err),
-                level=QgsMessageLog.WARNING)
+                level=Qgis.WARNING)
 
 
 class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog):

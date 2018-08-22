@@ -29,7 +29,7 @@ class BaseOsrm(object):
             duration=10)
         QgsMessageLog.logMessage(
             'OSRM-plugin error report :\n {}'.format(error),
-            level=QgsMessageLog.WARNING)
+            level=Qgis.WARNING)
 
     def make_prog_bar(self):
         progMessageBar = self.iface.messageBar().createMessage(
