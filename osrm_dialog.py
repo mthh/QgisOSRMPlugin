@@ -26,20 +26,24 @@ import json
 import sys
 import numpy as np
 from re import match
+from multiprocessing.pool import ThreadPool
 
 from PyQt5 import QtWidgets
+from PyQt5.QtGui import QColor
 from PyQt5.QtNetwork import QNetworkReply
 from qgis.core import (
     Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsFeature,
-    QgsLogger, QgsMapLayerProxyModel, QgsMessageLog, QgsProject,
-    QgsSingleSymbolRenderer, QgsVectorLayer)
+    QgsFillSymbol, QgsGeometry, QgsGraduatedSymbolRenderer, QgsLogger,
+    QgsMapLayerProxyModel, QgsMessageLog, QgsPoint, QgsProject,
+    QgsRendererRange, QgsSingleSymbolRenderer, QgsSymbol, QgsVectorLayer)
 from qgis.gui import QgsMapToolEmitPoint
 
 
 from .utils import (
     _chain, BaseOsrm, check_host, check_profile_name, decode_geom,
-    encode_to_polyline, get_coords_ids, prepare_route_symbol,
-    save_dialog)
+    encode_to_polyline, get_coords_ids, get_isochrones_colors,
+    get_search_frame, interpolate_from_times, make_regular_points,
+    qgsgeom_from_mpl_collec, prepare_route_symbol, save_dialog)
 
 from .osrm_route_dialogUi import Ui_OsrmRouteDialog
 from .osrm_table_dialogUi import Ui_OsrmTableDialog
@@ -184,10 +188,10 @@ class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
         error = self.reply.error()
         if error != QNetworkReply.NoError:
             # error_message = self.get_error_message(error)
-            # self.message.emit(error_message, Qgis.WARNING)
+            # self.message.emit(error_message, Qgis.Warning)
             QgsMessageLog.logMessage(
                 'OSRM-plugin error report :\n {}'.format(error),
-                level=Qgis.WARNING)
+                level=Qgis.Warning)
             self.reply.deleteLater()
             self.reply = None
             return
@@ -421,14 +425,320 @@ class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog, BaseOsrm):
                 "Something went wrong...(See Qgis log for traceback)")
             QgsMessageLog.logMessage(
                 'OSRM-plugin error report :\n {}'.format(err),
-                level=Qgis.WARNING)
+                level=Qgis.Warning)
 
 
-class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog):
-    def __init__(self, parent=None):
+class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
+    def __init__(self, iface, parent=None):
         """Constructor."""
         super(OsrmAccessDialog, self).__init__(parent)
         self.setupUi(self)
+        self.iface = iface
+        self.canvas = iface.mapCanvas()
+        self.originEmit = QgsMapToolEmitPoint(self.canvas)
+        self.intermediateEmit = QgsMapToolEmitPoint(self.canvas)
+        self.comboBox_pointlayer.setFilters(QgsMapLayerProxyModel.PointLayer)
+        self.comboBox_method.activated[str].connect(self.enable_functionnality)
+        self.pushButton_fetch.clicked.connect(self.get_access_isochrones)
+        self.pushButtonClear.clicked.connect(self.clear_all_isochrone)
+        self.lineEdit_xyO.textChanged.connect(self.change_nb_center)
+        self.nb_isocr = 0
+        self.host = None
+        self.progress = None
+
+    def change_nb_center(self):
+        nb_center = self.lineEdit_xyO.text().count('(')
+        self.textBrowser_nb_centers.setHtml(
+            """<p style=" margin-top:0px; margin-bottom:0px;"""
+            """margin-left:0px; margin-right:0px; -qt-block-indent:0; """
+            """text-indent:0px;"><span style=" font-style:italic;">"""
+            """{} center(s) selected</span></p>""".format(nb_center))
+
+    def enable_functionnality(self, text):
+        functions = (
+            self.pushButtonOrigin.setEnabled,
+            self.lineEdit_xyO.setEnabled,
+            self.textBrowser_nb_centers.setEnabled,
+            self.toolButton_poly.setEnabled,
+            self.comboBox_pointlayer.setEnabled,
+            self.label_3.setEnabled,
+            self.checkBox_selectedFt.setEnabled,
+            self.pushButton_fetch.setEnabled
+        )
+        if 'clicking' in text:
+            values = (True, True, True, True, False, False, False, True)
+        elif 'selecting' in text:
+            values = (False, False, False, False, True, True, True, True)
+        elif 'method' in text:
+            values = (False, False, False, False, False, False, False, False)
+        else:
+            return
+        for func, bool_value in zip(functions, values):
+            func(bool_value)
+
+    def clear_all_isochrone(self):
+        """
+        Clear previously done isochrone polygons and clear the coordinate field
+        """
+        self.lineEdit_xyO.setText('')
+        self.nb_isocr = 0
+        for layer in QgsProject.instance().mapLayers():
+            if 'isochrone_osrm' in layer or 'isochrone_center' in layer:
+                QgsProject.instance().removeMapLayer(layer)
+
+    def store_intermediate_acces(self, point):
+        if '4326' not in self.canvas.mapSettings().destinationCrs().authid():
+            crsSrc = self.canvas.mapSettings().destinationCrs()
+            xform = QgsCoordinateTransform(
+                crsSrc,
+                QgsCoordinateReferenceSystem(4326),
+                QgsProject.instance())
+            point = xform.transform(point)
+        tmp = self.lineEdit_xyO.text()
+        self.change_nb_center()
+        self.lineEdit_xyO.setText(', '.join([tmp, repr(point)]))
+
+    def get_points_from_canvas(self):
+        pts = self.lineEdit_xyO.text()
+        try:
+            assert match('^[^a-zA-Z]+$', pts) and len(pts) > 4
+            pts = eval(pts)
+            if len(pts) < 2:
+                raise ValueError
+            elif len(pts) == 2 and not isinstance(pts[0], tuple):
+                assert isinstance(pts[0], (int, float))
+                assert isinstance(pts[1], (int, float))
+                pts = [pts]
+            else:
+                assert all([isinstance(pt, tuple) for pt in pts])
+                assert all([
+                    isinstance(coord[0], (float, int))
+                    & isinstance(coord[1], (float, int))
+                    for coord in pts])
+            return pts
+        except Exception as err:
+            print(err)
+            QtWidgets.QMessageBox.warning(
+                self.iface.mainWindow(), 'Error',
+                "Invalid coordinates selected!")
+            return None
+
+    def add_final_pts(self):
+        center_pt_layer = QgsVectorLayer(
+            "Point?crs=epsg:4326&field=id_center:integer&field=role:string(80)",
+            "isochrone_center_{}".format(self.nb_isocr), "memory")
+        my_symb = QgsSymbol.defaultSymbol(0)
+        my_symb.setColor(QColor("#e31a1c"))
+        my_symb.setSize(1.2)
+        center_pt_layer.setRenderer(QgsSingleSymbolRenderer(my_symb))
+        features = []
+        for nb, pt in enumerate(self.pts):
+            xo, yo = pt["point"]
+            fet = QgsFeature()
+            fet.setGeometry(QgsGeometry.fromPoint(
+                QgsPoint(float(xo), float(yo))))
+            fet.setAttributes([nb, 'Origin'])
+            features.append(fet)
+        center_pt_layer.dataProvider().addFeatures(features)
+        QgsProject.instance().addMapLayer(center_pt_layer)
+
+    def get_access_isochrones(self):
+        """
+        Making the accessibility isochrones in few steps:
+        - make a grid of points aroung the origin point,
+        - snap each point (using OSRM locate function) on the road network,
+        - get the time-distance between the origin point and each of these pts
+            (using OSRM table function),
+        - make an interpolation grid to extract polygons corresponding to the
+            desired time intervals (using matplotlib library),
+        - render the polygon.
+        """
+        try:
+            self.host = check_host(self.lineEdit_host.text())
+            self.profile = check_profile_name(self.lineEdit_profileName.text())
+        except (ValueError, AssertionError) as err:
+            self.iface.messageBar().pushMessage(
+                "Error", "Please provide a valid non-empty URL", duration=10)
+            return
+
+        if 'clicking' in self.comboBox_method.currentText():
+            pts = self.get_points_from_canvas()
+        elif 'selecting' in self.comboBox_method.currentText():
+            layer = self.comboBox_pointlayer.currentLayer()
+            pts, _ = get_coords_ids(
+                layer, '', on_selected=self.checkBox_selectedFt.isChecked())
+            pts = tuple(pts)
+
+        if not pts:
+            return
+
+        max_time = self.spinBox_max.value()
+        self.interval_time = self.spinBox_intervall.value()
+        nb_inter = int(round(max_time / self.interval_time)) + 1
+        self.levels = tuple([nb for nb in range(
+                0, int(max_time + 1) + self.interval_time,
+                self.interval_time)][:nb_inter])
+
+        self.make_prog_bar()
+        self.max_points = 500 if len(pts) == 1 else 300
+        self.polygons = []
+
+        self.pts = [{
+            "levels": self.levels,
+            "host": self.host,
+            "max": max_time,
+            "max_points": self.max_points,
+            "point": pt,
+            "profile": self.profile,
+            } for pt in pts]
+        #
+        # pool = ThreadPool(processes=4 if len(pts) >= 4 else len(pts))
+        #
+        # try:
+        #     self.polygons = [i for i in pool.map(prep_access, pts)]
+        # except Exception as err:
+        #     self.display_error(err, 1)
+        #     return$
+
+        self.polygons = []
+        self.total_query = len(pts)
+        self.done = 0
+        for time_param in self.pts:
+            point = time_param['point']
+            max_time = time_param['max']
+            levels = time_param["levels"]
+
+            bounds = get_search_frame(point, max_time)
+            coords_grid = make_regular_points(bounds, time_param["max_points"])
+
+            src_end = 1
+            dest_end = src_end + len(coords_grid)
+
+            base_url = ''.join([
+                "http://",
+                time_param["host"],
+                '/table/',
+                time_param["profile"],
+                '/'])
+            url = ''.join([
+                base_url,
+                "polyline(",
+                encode_to_polyline(
+                    [(c[1], c[0]) for c in _chain([point], coords_grid)]),
+                ")",
+                '?sources=',
+                ';'.join([str(i) for i in range(src_end)]),
+                '&destinations=',
+                ';'.join([str(j) for j in range(src_end, dest_end)])
+                ])
+
+            self.query_url(url, self.query_done)
+
+            # times, origin_pt, snapped_dest_coords = \
+            #     fetch_table(url, [point], coords_grid)
+
+    def query_done(self):
+        error = self.reply.error()
+        print(error)
+        if error != QNetworkReply.NoError:
+            QgsLogger.debug('Error: {}'.format(error))
+            self.display_error(error, 1)
+            self.reply.deleteLater()
+            self.reply = None
+            return
+
+        response_text = self.reply.readAll().data().decode('utf-8')
+        # QgsLogger.debug('Response: {}'.format(response_text))
+        try:
+            self.parsed = json.loads(response_text)
+            assert "code" in self.parsed
+        except ValueError as er:
+            self.display_error(er, 1)
+            return
+        except Exception as err:
+            self.display_error(err, 1)
+            return
+        finally:
+            self.reply.deleteLater()
+            self.reply = None
+
+        if 'Ok' not in self.parsed['code']:
+            self.display_error(self.parsed['code'], 1)
+            return
+
+        times = np.array(self.parsed['durations'], dtype=float)
+        # new_src_coords = [ft["location"] for ft in self.parsed["sources"]]
+        snapped_dest_coords = [ft['location'] for ft in self.parsed['destinations']]
+        times = (times[0] / 60.0).round(2)  # Round values in minutes
+
+        # Fetch MatPlotLib polygons from a griddata interpolation
+        collec_poly = interpolate_from_times(
+            times, np.array(snapped_dest_coords), self.levels)
+
+        # Convert MatPlotLib polygons to QgsGeometry polygons :
+        polygons = qgsgeom_from_mpl_collec(collec_poly.collections)
+        self.polygons.append(polygons)
+        self.done += 1
+        if self.done == self.total_query:
+            self.all_done()
+
+    def all_done(self):
+        if len(self.polygons) == 1:
+            self.polygons = self.polygons[0]
+        else:
+            self.polygons = np.array(self.polygons).transpose().tolist()
+            self.polygons = \
+                [QgsGeometry.unaryUnion(polys) for polys in self.polygons]
+
+        isochrone_layer = QgsVectorLayer(
+            "MultiPolygon?crs=epsg:4326&field=id:integer"
+            "&field=min:integer(10)"
+            "&field=max:integer(10)",
+            "isochrone_osrm_{}".format(self.nb_isocr), "memory")
+        data_provider = isochrone_layer.dataProvider()
+        # Add the features to the layer to display :
+        features = []
+        levels = self.levels[1:]
+        self.progress.setValue(8.5)
+        for i, poly in enumerate(self.polygons):
+            if not poly:
+                continue
+            ft = QgsFeature()
+            ft.setGeometry(poly)
+            ft.setAttributes(
+                [i, levels[i] - self.interval_time, levels[i]])
+            features.append(ft)
+        data_provider.addFeatures(features[::-1])
+        self.nb_isocr += 1
+        self.progress.setValue(9.5)
+
+        # Render the value :
+        renderer = self.prepare_renderer(
+            levels, self.interval_time, len(self.polygons))
+        isochrone_layer.setRendererV2(renderer)
+        isochrone_layer.setLayerTransparency(25)
+        self.iface.messageBar().clearWidgets()
+        QgsProject.instance().addMapLayer(isochrone_layer)
+
+        self.add_final_pts()
+        self.iface.setActiveLayer(isochrone_layer)
+
+    @staticmethod
+    def prepare_renderer(levels, inter_time, lenpoly):
+        cats = [
+            ('{} - {} min'.format(levels[i] - inter_time, levels[i]),
+             levels[i] - inter_time,
+             levels[i])
+            for i in xrange(lenpoly)
+            ]  # label, lower bound, upper bound
+        colors = get_isochrones_colors(len(levels))
+        ranges = []
+        for ix, cat in enumerate(cats):
+            symbol = QgsFillSymbol()
+            symbol.setColor(QColor(colors[ix]))
+            rng = QgsRendererRange(cat[1], cat[2], symbol, cat[0])
+            ranges.append(rng)
+        return QgsGraduatedSymbolRenderer('max', ranges)
 
 
 class OsrmTspDialog(QtWidgets.QDialog, Ui_OsrmTspDialog):

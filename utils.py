@@ -5,10 +5,12 @@ from PyQt5.QtGui import QColor
 from PyQt5.QtNetwork import QNetworkRequest
 from PyQt5.QtWidgets import QDialog, QFileDialog, QMessageBox, QProgressBar
 from qgis.core import (
-    QgsCoordinateReferenceSystem, QgsCoordinateTransform,
+    Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform,
     QgsGeometry, QgsMessageLog, QgsNetworkAccessManager,
-    QgsPoint, QgsProject, QgsSymbol)
+    QgsPoint, QgsPointXY, QgsProject, QgsSymbol)
 from qgis.gui import QgsEncodingFileDialog
+from matplotlib.pyplot import contourf
+from matplotlib.mlab import griddata
 
 
 class BaseOsrm(object):
@@ -29,7 +31,7 @@ class BaseOsrm(object):
             duration=10)
         QgsMessageLog.logMessage(
             'OSRM-plugin error report :\n {}'.format(error),
-            level=Qgis.WARNING)
+            level=Qgis.Warning)
 
     def make_prog_bar(self):
         progMessageBar = self.iface.messageBar().createMessage(
@@ -39,7 +41,7 @@ class BaseOsrm(object):
         self.progress.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         progMessageBar.layout().addWidget(self.progress)
         self.iface.messageBar().pushWidget(
-            progMessageBar, self.iface.messageBar().INFO)
+            progMessageBar, Qgis.Info)
 
     def query_url(self, url, callback):
         req = QNetworkRequest(QUrl(url))
@@ -202,7 +204,9 @@ def get_coords_ids(layer, field, on_selected=False):
 
     if '4326' not in layer.crs().authid():
         xform = QgsCoordinateTransform(
-            layer.crs(), QgsCoordinateReferenceSystem(4326))
+            layer.crs(),
+            QgsCoordinateReferenceSystem(4326),
+            QgsProject.instance())
         coords = [xform.transform(ft.geometry().asPoint())
                   for ft in get_features_method()]
     else:
@@ -215,6 +219,120 @@ def get_coords_ids(layer, field, on_selected=False):
 
     return coords, ids
 
+
+def get_search_frame(point, max_time):
+    """
+    Define the search frame (ie. the bbox), given a center point and
+    the maximum time requested
+    Return
+    ------
+    xmin, ymin, xmax, ymax : float
+    """
+    search_len = (max_time * 4) * 1000
+    crsSrc = QgsCoordinateReferenceSystem(4326)
+    xform = QgsCoordinateTransform(
+        crsSrc,
+        QgsCoordinateReferenceSystem(3857),
+        QgsProject.instance())
+    point = xform.transform(QgsPointXY(*point))
+    xmin = point[0] - search_len
+    ymin = point[1] - search_len
+    xmax = point[0] + search_len
+    ymax = point[1] + search_len
+    crsSrc = QgsCoordinateReferenceSystem(3857)
+    xform = QgsCoordinateTransform(
+        crsSrc,
+        QgsCoordinateReferenceSystem(4326),
+        QgsProject.instance())
+    xmin, ymin = xform.transform(QgsPointXY(xmin, ymin))
+    xmax, ymax = xform.transform(QgsPointXY(xmax, ymax))
+    return xmin, ymin, xmax, ymax
+
+
+def interpolate_from_times(times, coords, levels, rev_coords=False):
+    if not rev_coords:
+        x = coords[..., 0]
+        y = coords[..., 1]
+    else:
+        x = coords[..., 1]
+        y = coords[..., 0]
+    xi = np.linspace(np.nanmin(x), np.nanmax(x), 100)
+    yi = np.linspace(np.nanmin(y), np.nanmax(y), 100)
+    zi = griddata(x, y, times, xi, yi, interp='linear')
+    v_bnd = np.nanmax(abs(zi))
+    collec_poly = contourf(
+        xi, yi, zi, levels, vmax=v_bnd, vmin=-v_bnd)
+    return collec_poly
+
+
+def qgsgeom_from_mpl_collec(collections):
+    polygons = []
+    for i, polygon in enumerate(collections):
+        mpoly = []
+        for path in polygon.get_paths():
+            path.should_simplify = False
+            poly = path.to_polygons()
+            if len(poly) > 0 and len(poly[0]) > 3:
+                exterior = [QgsPoint(*p.tolist()) for p in poly[0]]
+                holes = [[QgsPoint(*p.tolist()) for p in h]
+                         for h in poly[1:] if len(h) > 3]
+                if len(holes) == 1:
+                    mpoly.append([exterior, holes[0]])
+                elif len(holes) > 1:
+                    mpoly.append([exterior] + [h for h in holes])
+                else:
+                    mpoly.append([exterior])
+
+        if len(mpoly) == 1:
+            polygons.append(QgsGeometry.fromPolygon(mpoly[0]))
+        elif len(mpoly) > 1:
+            polygons.append(QgsGeometry.fromMultiPolygon(mpoly))
+        else:
+            polygons.append(QgsGeometry.fromPolygon([]))
+    return polygons
+
+
+def get_isochrones_colors(nb_features):
+    """ Ugly "helper" function to rewrite to avoid repetitions """
+    return {
+            1: ('#a6d96a',),
+            2: ('#fee08b', '#a6d96a'),
+            3: ('#66bd63',
+                '#fee08b', '#f46d43'),
+            4: ('#1a9850', '#a6d96a',
+                '#fee08b', '#f46d43'),
+            5: ('#1a9850', '#66bd63',
+                '#ffffbf', '#fc8d59', '#d73027'),
+            6: ('#1a9850', '#66bd63', '#d9ef8b',
+                '#fee08b', '#fc8d59', '#d73027'),
+            7: ('#1a9850', '#66bd63', '#d9ef8b', '#ffffbf',
+                '#fee08b', '#fc8d59', '#d73027'),
+            8: ('#1a9850', '#66bd63', '#a6d96a', '#d9ef8b',
+                '#fee08b', '#fdae61', '#f46d43', '#d73027'),
+            9: ('#1a9850', '#66bd63', '#a6d96a', '#d9ef8b', '#ffffbf',
+                '#fee08b', '#fdae61', '#f46d43', '#d73027'),
+            10: ('#006837', '#1a9850', '#66bd63', '#a6d96a', '#d9ef8b',
+                 '#fee08b', '#fdae61', '#f46d43', '#d73027', '#a50026'),
+            11: ('#006837', '#1a9850', '#66bd63', '#a6d96a', '#d9ef8b',
+                 '#ffffbf', '#fee08b', '#fdae61', '#f46d43', '#d73027',
+                 '#a50026'),
+            12: ('#006837', '#1a9850', '#66bd63', '#a6d96a', '#d9ef8b',
+                 '#e7ef88', '#ffffbf', '#fee08b', '#fdae61', '#f46d43',
+                 '#d73027', '#a50026'),
+            13: ('#006837', '#1a9850', '#66bd63', '#a6d96a', '#d9ef8b',
+                 '#e7ef88', '#ffffbf', '#fee08b', '#fdae61', '#f46d43',
+                 '#d73027', '#bb2921', '#a50026'),
+            14: ('#006837', '#1a9850', '#66bd63', '#a6d96a', '#d9ef8b',
+                 '#e7ef88', '#ffffbf', '#fff6a0', '#fee08b', '#fdae61',
+                 '#f46d43', '#d73027', '#bb2921', '#a50026'),
+            15: ('#006837', '#1a9850', '#66bd63', '#a6d96a', '#d9ef8b',
+                 '#e7ef88', '#ffffbf', '#ffffbf', '#fff6a0', '#fee08b',
+                 '#fdae61', '#f46d43', '#d73027', '#bb2921', '#a50026'),
+            16: ('#006837', '#1a9850', '#66bd63', '#a6d96a',
+                 '#d9ef8b', '#e7ef88', '#ffffbf', '#ffffbf', '#ffffbf',
+                 '#fff6a0', '#fee08b', '#fdae61', '#f46d43', '#d73027',
+                 '#bb2921', '#a50026'),
+            }[nb_features]
 
 ###############################################################################
 #

@@ -70,7 +70,7 @@ class OsrmTools:
 
         # Create the dialog (after translation) and keep reference
         self.dlg_route = OsrmRouteDialog(self.iface)
-        self.dlg_access = OsrmAccessDialog()
+        self.dlg_access = OsrmAccessDialog(self.iface)
         self.dlg_table = OsrmTableDialog(self.iface)
         self.dlg_tsp = OsrmTspDialog()
         self.dlg_batchroute = OsrmBatchRouteDialog()
