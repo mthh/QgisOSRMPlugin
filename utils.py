@@ -6,7 +6,8 @@ from PyQt5.QtNetwork import QNetworkRequest
 from PyQt5.QtWidgets import QDialog, QFileDialog, QMessageBox, QProgressBar
 from qgis.core import (
     QgsCoordinateReferenceSystem, QgsCoordinateTransform,
-    QgsGeometry, QgsNetworkAccessManager, QgsPoint, QgsProject, QgsSymbol)
+    QgsGeometry, QgsMessageLog, QgsNetworkAccessManager,
+    QgsPoint, QgsProject, QgsSymbol)
 from qgis.gui import QgsEncodingFileDialog
 
 
@@ -26,9 +27,9 @@ class BaseOsrm(object):
         self.iface.messageBar().pushMessage(
             "Error", msg[code] + "(see QGis log for error traceback)",
             duration=10)
-    #     QgsMessageLog.logMessage(
-    #         'OSRM-plugin error report :\n {}'.format(error),
-    #         level=QgsMessageLog.WARNING)
+        QgsMessageLog.logMessage(
+            'OSRM-plugin error report :\n {}'.format(error),
+            level=QgsMessageLog.WARNING)
 
     def make_prog_bar(self):
         progMessageBar = self.iface.messageBar().createMessage(

@@ -21,18 +21,23 @@
  *                                                                         *
  ***************************************************************************/
 """
+import csv
+import json
+import sys
+import numpy as np
+from re import match
+
 from PyQt5 import QtWidgets
 from PyQt5.QtNetwork import QNetworkReply
 from qgis.core import (
     QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsFeature,
-    QgsLogger, QgsMapLayerProxyModel, QgsProject,
+    QgsLogger, QgsMapLayerProxyModel, QgsMessageLog, QgsProject,
     QgsSingleSymbolRenderer, QgsVectorLayer)
 from qgis.gui import QgsMapToolEmitPoint
-from re import match
-import json
+
 
 from .utils import (
-    BaseOsrm, check_host, check_profile_name, decode_geom,
+    _chain, BaseOsrm, check_host, check_profile_name, decode_geom,
     encode_to_polyline, get_coords_ids, prepare_route_symbol,
     save_dialog)
 
@@ -302,27 +307,69 @@ class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog, BaseOsrm):
         s_layer = self.comboBox_layer.currentLayer()
         d_layer = self.comboBox_layer_2.currentLayer() \
             if self.comboBox_layer_2.currentLayer() != s_layer else None
-
-        coords_src, ids_src = \
+        self.d_layer = d_layer
+        coords_src, self.ids_src = \
             get_coords_ids(s_layer, self.comboBox_idfield.currentField())
 
-        coords_dest, ids_dest = \
+        coords_dest, self.ids_dest = \
             get_coords_ids(d_layer, self.comboBox_idfield_2.currentField()) \
             if d_layer else (None, None)
 
         url = ''.join(["http://", self.host, '/table/', profile, '/'])
 
+        if not coords_dest:
+            query = ''.join(
+                [url, "polyline(",
+                 encode_to_polyline([(c[1], c[0]) for c in coords_src]), ")"])
+        else:
+            src_end = len(coords_src)
+            dest_end = src_end + len(coords_dest)
+            query = ''.join([
+                url,
+                "polyline(",
+                encode_to_polyline([
+                    (c[1], c[0]) for c in _chain(coords_src, coords_dest)]),
+                ")",
+                '?sources=',
+                ';'.join([str(i) for i in range(src_end)]),
+                '&destinations=',
+                ';'.join([str(j) for j in range(src_end, dest_end)])
+                ])
+        self.query_url(query, self.query_done)
+
+    def query_done(self):
+        error = self.reply.error()
+        if error == QNetworkReply.NoError:
+            response_text = self.reply.readAll().data().decode('utf-8')
+            QgsLogger.debug('Response: {}'.format(response_text))
+            try:
+                self.parsed = json.loads(response_text)
+            except ValueError:
+                return
+            finally:
+                self.reply.deleteLater()
+                self.reply = None
+        else:
+            QgsLogger.debug('Error: {}'.format(error))
+            self.display_error(error, 1)
+            self.reply.deleteLater()
+            self.reply = None
+            return
+
         try:
-            table, new_src_coords, new_dest_coords = \
-                    fetch_table(url, coords_src, coords_dest)
-        except ValueError as err:
-            print(err)
+            assert "code" in self.parsed
+        except Exception as err:
             self.display_error(err, 1)
             return
-        except Exception as er:
-            print(er)
-            self.display_error(er, 1)
+
+        if 'Ok' not in self.parsed['code']:
+            self.display_error(self.parsed['code'], 1)
             return
+
+        table = np.array(self.parsed["durations"], dtype=float)
+        # new_src_coords = [ft["location"] for ft in self.parsed["sources"]]
+        # new_dest_coords = None if not coords_dest \
+        #     else [ft["location"] for ft in self.parsed["destinations"]]
 
         # Convert the matrix in minutes if needed :
         if self.checkBox_minutes.isChecked():
@@ -341,31 +388,30 @@ class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog, BaseOsrm):
 
         # Write the result in csv :
         try:
-            out_file = codecs_open(self.filename, 'w', encoding=self.encoding)
-            writer = csv.writer(out_file, lineterminator='\n')
-            if self.checkBox_flatten.isChecked():
-                table = table.ravel()
-                if d_layer:
-                    idsx = [(i, j) for i in ids_src for j in ids_dest]
+            with open(self.filename, 'w', encoding=self.encoding) as out_file:
+                writer = csv.writer(out_file, lineterminator='\n')
+                if self.checkBox_flatten.isChecked():
+                    table = table.ravel()
+                    if self.d_layer:
+                        idsx = [(i, j) for i in self.ids_src for j in self.ids_dest]
+                    else:
+                        idsx = [(i, j) for i in self.ids_src for j in self.ids_src]
+                    writer.writerow([u'Origin', u'Destination', u'Time'])
+                    writer.writerows([
+                        [idsx[i][0], idsx[i][1], table[i]]
+                        for i in xrange(len(idsx))
+                        ])
                 else:
-                    idsx = [(i, j) for i in ids_src for j in ids_src]
-                writer.writerow([u'Origin', u'Destination', u'Time'])
-                writer.writerows([
-                    [idsx[i][0], idsx[i][1], table[i]]
-                    for i in xrange(len(idsx))
-                    ])
-            else:
-                if d_layer:
-                    writer.writerow([u''] + ids_dest)
-                    writer.writerows(
-                        [[ids_src[_id]] + line
-                         for _id, line in enumerate(table.tolist())])
-                else:
-                    writer.writerow([u''] + ids_src)
-                    writer.writerows(
-                        [[ids_src[_id]] + line
-                         for _id, line in enumerate(table.tolist())])
-            out_file.close()
+                    if self.d_layer:
+                        writer.writerow([u''] + self.ids_dest)
+                        writer.writerows(
+                            [[self.ids_src[_id]] + line
+                             for _id, line in enumerate(table.tolist())])
+                    else:
+                        writer.writerow([u''] + self.ids_src)
+                        writer.writerows(
+                            [[self.ids_src[_id]] + line
+                             for _id, line in enumerate(table.tolist())])
             QtWidgets.QMessageBox.information(
                 self.iface.mainWindow(), 'Done',
                 "OSRM table saved in {}".format(self.filename))
@@ -377,7 +423,6 @@ class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog, BaseOsrm):
             QgsMessageLog.logMessage(
                 'OSRM-plugin error report :\n {}'.format(err),
                 level=QgsMessageLog.WARNING)
-
 
 
 class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog):
