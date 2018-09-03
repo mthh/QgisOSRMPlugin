@@ -34,7 +34,7 @@ from PyQt5.QtNetwork import QNetworkReply
 from qgis.core import (
     Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsFeature,
     QgsFillSymbol, QgsGeometry, QgsGraduatedSymbolRenderer, QgsLogger,
-    QgsMapLayerProxyModel, QgsMessageLog, QgsPoint, QgsProject,
+    QgsMapLayerProxyModel, QgsMessageLog, QgsPointXY, QgsProject,
     QgsRendererRange, QgsSingleSymbolRenderer, QgsSymbol, QgsVectorLayer)
 from qgis.gui import QgsMapToolEmitPoint
 
@@ -197,7 +197,6 @@ class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
             return
 
         response_text = self.reply.readAll().data().decode('utf-8')
-        QgsLogger.debug('Response: {}'.format(response_text))
         try:
             self.parsed = json.loads(response_text)
             assert 'code' in self.parsed
@@ -347,14 +346,18 @@ class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog, BaseOsrm):
     def query_done(self):
         error = self.reply.error()
         if error != QNetworkReply.NoError:
-            QgsLogger.debug('Error: {}'.format(error))
-            self.display_error(error, 1)
+            try:
+                response_text = self.reply.readAll().data().decode('utf-8')
+                parsed = json.loads(response_text)
+                assert 'message' in parsed
+                self.display_error(parsed['message'], 1)
+            except:
+                self.display_error(error, 1)
             self.reply.deleteLater()
             self.reply = None
             return
 
         response_text = self.reply.readAll().data().decode('utf-8')
-        QgsLogger.debug('Response: {}'.format(response_text))
         try:
             self.parsed = json.loads(response_text)
             assert "code" in self.parsed
@@ -535,8 +538,8 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
         for nb, pt in enumerate(self.pts):
             xo, yo = pt["point"]
             fet = QgsFeature()
-            fet.setGeometry(QgsGeometry.fromPoint(
-                QgsPoint(float(xo), float(yo))))
+            fet.setGeometry(QgsGeometry.fromPointXY(
+                QgsPointXY(float(xo), float(yo))))
             fet.setAttributes([nb, 'Origin'])
             features.append(fet)
         center_pt_layer.dataProvider().addFeatures(features)
@@ -639,16 +642,19 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
 
     def query_done(self):
         error = self.reply.error()
-        print(error)
         if error != QNetworkReply.NoError:
-            QgsLogger.debug('Error: {}'.format(error))
-            self.display_error(error, 1)
+            try:
+                response_text = self.reply.readAll().data().decode('utf-8')
+                parsed = json.loads(response_text)
+                assert 'message' in parsed
+                self.display_error(parsed['message'], 1)
+            except:
+                self.display_error(error, 1)
             self.reply.deleteLater()
             self.reply = None
             return
 
         response_text = self.reply.readAll().data().decode('utf-8')
-        # QgsLogger.debug('Response: {}'.format(response_text))
         try:
             self.parsed = json.loads(response_text)
             assert "code" in self.parsed
@@ -715,8 +721,8 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
         # Render the value :
         renderer = self.prepare_renderer(
             levels, self.interval_time, len(self.polygons))
-        isochrone_layer.setRendererV2(renderer)
-        isochrone_layer.setLayerTransparency(25)
+        isochrone_layer.setRenderer(renderer)
+        # isochrone_layer.setLayerTransparency(25)
         self.iface.messageBar().clearWidgets()
         QgsProject.instance().addMapLayer(isochrone_layer)
 
@@ -729,7 +735,7 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
             ('{} - {} min'.format(levels[i] - inter_time, levels[i]),
              levels[i] - inter_time,
              levels[i])
-            for i in xrange(lenpoly)
+            for i in range(lenpoly)
             ]  # label, lower bound, upper bound
         colors = get_isochrones_colors(len(levels))
         ranges = []

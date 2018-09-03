@@ -10,7 +10,7 @@ from qgis.core import (
     QgsPoint, QgsPointXY, QgsProject, QgsSymbol)
 from qgis.gui import QgsEncodingFileDialog
 from matplotlib.pyplot import contourf
-from matplotlib.mlab import griddata
+from scipy.interpolate import griddata
 
 
 class BaseOsrm(object):
@@ -256,12 +256,12 @@ def interpolate_from_times(times, coords, levels, rev_coords=False):
     else:
         x = coords[..., 1]
         y = coords[..., 0]
-    xi = np.linspace(np.nanmin(x), np.nanmax(x), 100)
-    yi = np.linspace(np.nanmin(y), np.nanmax(y), 100)
-    zi = griddata(x, y, times, xi, yi, interp='linear')
-    v_bnd = np.nanmax(abs(zi))
+    xi, yi = np.mgrid[np.nanmin(x):np.nanmax(x):100j, np.nanmin(y):np.nanmax(y):100j]
+    # zi = griddata(x, y, times, xi, yi, interp='linear')
+    zi = griddata(coords, times, (xi, yi), 'linear')
+    print(zi.shape)
     collec_poly = contourf(
-        xi, yi, zi, levels, vmax=v_bnd, vmin=-v_bnd)
+        xi, yi, zi, levels, vmax=np.nanmax(zi), vmin=np.nanmin(zi))
     return collec_poly
 
 
@@ -273,8 +273,8 @@ def qgsgeom_from_mpl_collec(collections):
             path.should_simplify = False
             poly = path.to_polygons()
             if len(poly) > 0 and len(poly[0]) > 3:
-                exterior = [QgsPoint(*p.tolist()) for p in poly[0]]
-                holes = [[QgsPoint(*p.tolist()) for p in h]
+                exterior = [QgsPointXY(*p.tolist()) for p in poly[0]]
+                holes = [[QgsPointXY(*p.tolist()) for p in h]
                          for h in poly[1:] if len(h) > 3]
                 if len(holes) == 1:
                     mpoly.append([exterior, holes[0]])
@@ -284,11 +284,11 @@ def qgsgeom_from_mpl_collec(collections):
                     mpoly.append([exterior])
 
         if len(mpoly) == 1:
-            polygons.append(QgsGeometry.fromPolygon(mpoly[0]))
+            polygons.append(QgsGeometry.fromPolygonXY(mpoly[0]))
         elif len(mpoly) > 1:
-            polygons.append(QgsGeometry.fromMultiPolygon(mpoly))
+            polygons.append(QgsGeometry.fromMultiPolygonXY(mpoly))
         else:
-            polygons.append(QgsGeometry.fromPolygon([]))
+            polygons.append(QgsGeometry.fromPolygonXY([]))
     return polygons
 
 
