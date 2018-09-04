@@ -48,10 +48,9 @@ PY_FILES = \
 	utils.py \
 	osrm_dialog.py \
 	osrm_batch_route_dialogUi.py \
-  osrm_access_dialogUi.py \
+	osrm_access_dialogUi.py \
 	osrm_route_dialogUi.py \
-	osrm_tsp_dialogUi.py \
-  osrm_table_dialogUi.py
+	osrm_table_dialogUi.py
 
 # UI_FILES = osrm_dialog_base.ui
 
@@ -65,7 +64,6 @@ PEP8EXCLUDE=pydev,resources.py,conf.py,third_party,ui
 
 COMPILED_UI_FILES = osrm_access_dialogUi.py \
     osrm_route_dialogUi.py \
-    osrm_tsp_dialogUi.py \
     osrm_table_dialogUi.py \
     osrm_batch_route_dialogUi.py
 
@@ -86,7 +84,6 @@ default: compile
 compile: $(COMPILED_RESOURCE_FILES)
 	pyuic5 osrm_access_dialog.ui -o osrm_access_dialogUi.py
 	pyuic5 osrm_route_dialog.ui -o osrm_route_dialogUi.py
-	pyuic5 osrm_tsp_dialog.ui -o osrm_tsp_dialogUi.py
 	pyuic5 osrm_table_dialog.ui -o osrm_table_dialogUi.py
 	pyuic5 osrm_batch_route_dialog.ui -o osrm_batch_route_dialogUi.py
 

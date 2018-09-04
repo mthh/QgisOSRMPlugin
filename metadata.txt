@@ -1,7 +1,7 @@
-# This file contains metadata for your plugin. Since 
-# version 2.0 of QGIS this is the proper way to supply 
-# information about a plugin. The old method of 
-# embedding metadata in __init__.py will 
+# This file contains metadata for your plugin. Since
+# version 2.0 of QGIS this is the proper way to supply
+# information about a plugin. The old method of
+# embedding metadata in __init__.py will
 # is no longer supported since version 2.0.
 
 # This file should be included when you package your plugin.# Mandatory items:
@@ -14,10 +14,10 @@ version=0.1
 author=Matthieu Viry
 email=matthieu.viry@cnrs.fr
 
-about=OSRM (Open Source Routing Machine) plugin for QGIS, allowing to query a local/distant OSRM server API in order to display route(s), draw accessibility isochrones and export time-distance matrix. Requires Python modules numpy and matplotlib.
+about=OSRM (Open Source Routing Machine) plugin for QGIS, allowing to query a local/distant OSRM server API in order to display route(s), draw accessibility isochrones and export time-distance matrix. Requires Python modules matplotlib, numpy and scipy.
 
-tracker=http://bugs
-repository=http://repo
+tracker=https://github.com/mthh/QgisOSRMplugin/issues
+repository=https://github.com/mthh/QgisOSRMplugin
 # End of mandatory metadata
 
 # Recommended items:
@@ -26,9 +26,9 @@ repository=http://repo
 # changelog=
 
 # Tags are comma separated with spaces allowed
-tags=OSRM,OSM,distance,accesibility,isochrone,routing
+tags=OSRM,OSM,distance,accessibility,isochrone,routing
 
-homepage=http://homepage
+homepage=https://github.com/mthh/QgisOSRMplugin
 category=Web
 icon=icon.png
 # experimental flag
@@ -36,4 +36,3 @@ experimental=False
 
 # deprecated flag (applies to the whole plugin, not just a single version)
 deprecated=False
-

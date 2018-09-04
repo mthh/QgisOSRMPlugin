@@ -48,7 +48,6 @@ from .utils import (
 from .osrm_route_dialogUi import Ui_OsrmRouteDialog
 from .osrm_table_dialogUi import Ui_OsrmTableDialog
 from .osrm_access_dialogUi import Ui_OsrmAccessDialog
-from .osrm_tsp_dialogUi import Ui_OsrmTspDialog
 from .osrm_batch_route_dialogUi import Ui_OsrmBatchRouteDialog
 
 
@@ -79,6 +78,7 @@ class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
         self.intermediate.append(tuple(map(lambda x: round(x, 6), point)))
         self.canvas.unsetMapTool(self.intermediateEmit)
         self.lineEdit_xyI.setText(str(self.intermediate)[1:-1])
+        self.putOnTop()
 
     def store_destination(self, point):
         if '4326' not in self.canvas.mapSettings().destinationCrs().authid():
@@ -92,6 +92,7 @@ class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
         self.canvas.unsetMapTool(self.destinationEmit)
         self.lineEdit_xyD.setText(
             str(tuple(map(lambda x: round(x, 6), point))))
+        self.putOnTop()
 
     def get_alternatives(self, provider):
         """
@@ -399,9 +400,17 @@ class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog, BaseOsrm):
                 if self.checkBox_flatten.isChecked():
                     table = table.ravel()
                     if self.d_layer:
-                        idsx = [(i, j) for i in self.ids_src for j in self.ids_dest]
+                        idsx = [
+                            (i, j)
+                            for i in self.ids_src
+                            for j in self.ids_dest
+                        ]
                     else:
-                        idsx = [(i, j) for i in self.ids_src for j in self.ids_src]
+                        idsx = [
+                            (i, j)
+                            for i in self.ids_src
+                            for j in self.ids_src
+                        ]
                     writer.writerow([u'Origin', u'Destination', u'Time'])
                     writer.writerows([
                         [idsx[i][0], idsx[i][1], table[i]]
@@ -499,7 +508,9 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
             point = xform.transform(point)
         tmp = self.lineEdit_xyO.text()
         self.change_nb_center()
-        self.lineEdit_xyO.setText(', '.join([tmp, repr(point)]))
+        self.lineEdit_xyO.setText(
+            ', '.join([tmp, str(tuple(map(lambda x: round(x, 6), point)))]))
+        self.putOnTop()
 
     def get_points_from_canvas(self):
         pts = self.lineEdit_xyO.text()
@@ -583,7 +594,7 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
                 self.interval_time)][:nb_inter])
 
         self.make_prog_bar()
-        self.max_points = 900 if len(pts) == 1 else 700
+        self.max_points = 1100 if len(pts) == 1 else 800
         self.polygons = []
 
         self.pts = [{
@@ -749,13 +760,6 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
             rng = QgsRendererRange(cat[1], cat[2], symbol, cat[0])
             ranges.append(rng)
         return QgsGraduatedSymbolRenderer('max', ranges)
-
-
-class OsrmTspDialog(QtWidgets.QDialog, Ui_OsrmTspDialog):
-    def __init__(self, parent=None):
-        """Constructor."""
-        super(OsrmTspDialog, self).__init__(parent)
-        self.setupUi(self)
 
 
 class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog):

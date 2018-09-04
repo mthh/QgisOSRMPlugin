@@ -34,8 +34,8 @@ from .osrm_dialog import (
     OsrmRouteDialog,
     OsrmTableDialog,
     OsrmAccessDialog,
-    OsrmTspDialog,
-    OsrmBatchRouteDialog)
+    OsrmBatchRouteDialog,
+)
 
 
 class OsrmTools:
@@ -72,7 +72,6 @@ class OsrmTools:
         self.dlg_route = OsrmRouteDialog(self.iface)
         self.dlg_access = OsrmAccessDialog(self.iface)
         self.dlg_table = OsrmTableDialog(self.iface)
-        self.dlg_tsp = OsrmTspDialog()
         self.dlg_batchroute = OsrmBatchRouteDialog()
 
         # Declare instance attributes
@@ -197,14 +196,6 @@ class OsrmTools:
 
         self.add_action(
             None,
-            text=self.tr(u'Solve the Traveling Salesman Problem with OSRM'),
-            callback=self.run_tsp,
-            parent=self.iface.mainWindow(),
-            add_to_toolbar=False,
-            )
-
-        self.add_action(
-            None,
             text=self.tr(u'Export many routes from OSRM'),
             callback=self.run_batchroute,
             parent=self.iface.mainWindow(),
@@ -264,20 +255,16 @@ class OsrmTools:
         """Run method that performs all the real work"""
         # show the dialog
         self.dlg_access.show()
+        self.dlg_access.originEmit.canvasClicked.connect(
+            self.dlg_access.store_origin)
+        self.dlg_access.intermediateEmit.canvasClicked.connect(
+            self.dlg_access.store_intermediate_acces)
+        self.dlg_access.pushButtonOrigin.clicked.connect(
+            lambda _: self.canvas.setMapTool(self.dlg_access.originEmit))
+        self.dlg_access.toolButton_poly.clicked.connect(
+            lambda _: self.canvas.setMapTool(self.dlg_access.intermediateEmit))
         # Run the dialog event loop
         result = self.dlg_access.exec_()
-        # See if OK was pressed
-        if result:
-            # Do something useful here - delete the line containing pass and
-            # substitute with your code.
-            pass
-
-    def run_tsp(self):
-        """Run method that performs all the real work"""
-        # show the dialog
-        self.dlg_tsp.show()
-        # Run the dialog event loop
-        result = self.dlg_tsp.exec_()
         # See if OK was pressed
         if result:
             # Do something useful here - delete the line containing pass and

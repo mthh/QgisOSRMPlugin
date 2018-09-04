@@ -67,6 +67,17 @@ class BaseOsrm(object):
             "-backend#references-in-publications'>on GitHub</a>)<br></p>")
         mbox.open()
 
+    def putOnTop(self):
+        if self.windowState() != Qt.WindowMaximized:
+            self.showMaximized()
+            self.showNormal()
+        else:
+            self.showNormal()
+            self.showMaximized()
+
+        self.raise_()
+        self.activateWindow()
+
     def store_origin(self, point):
         """
         Method to store a click on the QGIS canvas
@@ -82,6 +93,7 @@ class BaseOsrm(object):
         self.canvas.unsetMapTool(self.originEmit)
         self.lineEdit_xyO.setText(
             str(tuple(map(lambda x: round(x, 6), point))))
+        self.putOnTop()
 
 
 def check_host(url):
