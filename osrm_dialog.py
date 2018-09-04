@@ -185,35 +185,11 @@ class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
 
         self.query_url(url, self.query_done)
 
-    def query_done(self, reply):
-        error = reply.error()
-        if error != QNetworkReply.NoError:
-            # error_message = self.get_error_message(error)
-            # self.message.emit(error_message, Qgis.Warning)
-            QgsMessageLog.logMessage(
-                'OSRM-plugin error report :\n {}'.format(error),
-                level=Qgis.Warning)
-            reply.deleteLater()
-            reply = None
+    def query_done(self, result):
+        if 'error' in result:
+            self.display_error(result['error'], 1)
             return
-
-        response_text = reply.readAll().data().decode('utf-8')
-        try:
-            self.parsed = json.loads(response_text)
-            assert 'code' in self.parsed
-        except ValueError as er:
-            self.display_error(er, 1)
-            return
-        except Exception as err:
-            self.display_error(err, 1)
-            return
-        finally:
-            reply.deleteLater()
-            reply = None
-
-        if 'Ok' not in self.parsed['code']:
-            self.display_error(self.parsed['code'], 1)
-            return
+        self.parsed = result['value']
 
         try:
             enc_line = self.parsed['routes'][0]["geometry"]
@@ -344,37 +320,12 @@ class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog, BaseOsrm):
 
         self.query_url(query, self.query_done)
 
-    def query_done(self, reply):
-        error = reply.error()
-        if error != QNetworkReply.NoError:
-            try:
-                response_text = reply.readAll().data().decode('utf-8')
-                parsed = json.loads(response_text)
-                assert 'message' in parsed
-                self.display_error(parsed['message'], 1)
-            except:
-                self.display_error(error, 1)
-            reply.deleteLater()
-            reply = None
+    def query_done(self, result):
+        if 'error' in result:
+            self.display_error(result['error'], 1)
             return
 
-        response_text = reply.readAll().data().decode('utf-8')
-        try:
-            self.parsed = json.loads(response_text)
-            assert "code" in self.parsed
-        except ValueError as er:
-            self.display_error(er, 1)
-            return
-        except Exception as err:
-            self.display_error(err, 1)
-            return
-        finally:
-            reply.deleteLater()
-            reply = None
-
-        if 'Ok' not in self.parsed['code']:
-            self.display_error(self.parsed['code'], 1)
-            return
+        self.parsed = result['value']
 
         table = np.array(self.parsed["durations"], dtype=float)
 
@@ -643,42 +594,16 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
             # times, origin_pt, snapped_dest_coords = \
             #     fetch_table(url, [point], coords_grid)
 
-    def query_done(self, reply):
-        error = reply.error()
-        if error != QNetworkReply.NoError:
-            try:
-                response_text = reply.readAll().data().decode('utf-8')
-                parsed = json.loads(response_text)
-                assert 'message' in parsed
-                self.display_error(parsed['message'], 1)
-            except:
-                self.display_error(error, 1)
-            reply.deleteLater()
-            reply = None
+    def query_done(self, result):
+        if 'error' in result:
+            self.display_error(result['error'], 1)
             return
 
-        response_text = reply.readAll().data().decode('utf-8')
-        try:
-            self.parsed = json.loads(response_text)
-            assert "code" in self.parsed
-        except ValueError as er:
-            self.display_error(er, 1)
-            return
-        except Exception as err:
-            self.display_error(err, 1)
-            return
-        finally:
-            reply.deleteLater()
-            reply = None
-
-        if 'Ok' not in self.parsed['code']:
-            self.display_error(self.parsed['code'], 1)
-            return
-
-        times = np.array(self.parsed['durations'], dtype=float)
+        parsed = result['value']
+        times = np.array(parsed['durations'], dtype=float)
         # new_src_coords = [ft["location"] for ft in self.parsed["sources"]]
         snapped_dest_coords = [
-            ft['location'] for ft in self.parsed['destinations']]
+            ft['location'] for ft in parsed['destinations']]
         times = (times[0] / 60.0).round(2)  # Round values in minutes
 
         # Fetch MatPlotLib polygons from a griddata interpolation

@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 import numpy as np
+import json
 from PyQt5.QtCore import QFileInfo, QSettings, Qt, QUrl
 from PyQt5.QtGui import QColor
-from PyQt5.QtNetwork import QNetworkRequest
+from PyQt5.QtNetwork import QNetworkReply, QNetworkRequest
 from PyQt5.QtWidgets import QDialog, QFileDialog, QMessageBox, QProgressBar
 from qgis.core import (
     Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform,
@@ -46,7 +47,38 @@ class BaseOsrm(object):
     def query_url(self, url, callback):
         req = QNetworkRequest(QUrl(url))
         reply = QgsNetworkAccessManager.instance().get(req)
-        reply.finished.connect(lambda: callback(reply))
+        reply.finished.connect(lambda: self.read_response(reply, callback))
+
+    def read_response(self, reply, callback):
+        result = {}
+        error = reply.error()
+        if error != QNetworkReply.NoError:
+            try:
+                response_text = reply.readAll().data().decode('utf-8')
+                parsed = json.loads(response_text)
+                assert 'message' in parsed
+                result['error'] = parsed['message']
+            except:
+                result['error'] = error
+            reply.deleteLater()
+            reply = None
+        else:
+            response_text = reply.readAll().data().decode('utf-8')
+            try:
+                parsed = json.loads(response_text)
+                assert "code" in parsed
+                if 'Ok' not in parsed['code']:
+                    result['error'] = parsed['message']
+                else:
+                    result['value'] = parsed
+            except ValueError as er:
+                result['error'] = er
+            except Exception as err:
+                result['error'] = err
+            finally:
+                reply.deleteLater()
+                reply = None
+        callback(result)
 
     def print_about(self):
         mbox = QMessageBox(self.iface.mainWindow())
