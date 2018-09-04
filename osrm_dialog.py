@@ -594,14 +594,6 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
             "point": pt,
             "profile": self.profile,
             } for pt in pts]
-        #
-        # pool = ThreadPool(processes=4 if len(pts) >= 4 else len(pts))
-        #
-        # try:
-        #     self.polygons = [i for i in pool.map(prep_access, pts)]
-        # except Exception as err:
-        #     self.display_error(err, 1)
-        #     return$
 
         self.polygons = []
         self.total_query = len(pts)
@@ -674,7 +666,8 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
 
         times = np.array(self.parsed['durations'], dtype=float)
         # new_src_coords = [ft["location"] for ft in self.parsed["sources"]]
-        snapped_dest_coords = [ft['location'] for ft in self.parsed['destinations']]
+        snapped_dest_coords = [
+            ft['location'] for ft in self.parsed['destinations']]
         times = (times[0] / 60.0).round(2)  # Round values in minutes
 
         # Fetch MatPlotLib polygons from a griddata interpolation
@@ -692,9 +685,20 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
         if len(self.polygons) == 1:
             self.polygons = self.polygons[0]
         else:
+            # Merge the contours from the various isochrones
             self.polygons = np.array(self.polygons).transpose().tolist()
             self.polygons = \
                 [QgsGeometry.unaryUnion(polys) for polys in self.polygons]
+            self.polygons = list(reversed(self.polygons))
+            newpolygons = []
+            for i, poly in enumerate(self.polygons):
+                if i + 1 == len(self.polygons):
+                    newpolygons.append(poly)
+                else:
+                    poly = poly.difference(
+                        QgsGeometry.unaryUnion(self.polygons[i+1:]))
+                    newpolygons.append(poly)
+            self.polygons = list(reversed(newpolygons))
 
         isochrone_layer = QgsVectorLayer(
             "MultiPolygon?crs=epsg:4326&field=id:integer"

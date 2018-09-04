@@ -249,17 +249,14 @@ def get_search_frame(point, max_time):
     return xmin, ymin, xmax, ymax
 
 
-def interpolate_from_times(times, coords, levels, rev_coords=False):
-    if not rev_coords:
-        x = coords[..., 0]
-        y = coords[..., 1]
-    else:
-        x = coords[..., 1]
-        y = coords[..., 0]
-    xi, yi = np.mgrid[np.nanmin(x):np.nanmax(x):50j, np.nanmin(y):np.nanmax(y):50j]
-    # zi = griddata(x, y, times, xi, yi, interp='linear')
+def interpolate_from_times(times, coords, levels):
+    x = coords[..., 0]
+    y = coords[..., 1]
+    xi, yi = np.mgrid[
+        np.nanmin(x):np.nanmax(x):60j,
+        np.nanmin(y):np.nanmax(y):60j,
+    ]
     zi = griddata(coords, times, (xi, yi), 'linear')
-    print(zi.shape)
     collec_poly = contourf(
         xi, yi, zi, levels, vmax=np.nanmax(zi), vmin=np.nanmin(zi))
     return collec_poly
