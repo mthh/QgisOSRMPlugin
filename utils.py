@@ -45,8 +45,8 @@ class BaseOsrm(object):
 
     def query_url(self, url, callback):
         req = QNetworkRequest(QUrl(url))
-        self.reply = QgsNetworkAccessManager.instance().get(req)
-        self.reply.finished.connect(callback)
+        reply = QgsNetworkAccessManager.instance().get(req)
+        reply.finished.connect(lambda: callback(reply))
 
     def print_about(self):
         mbox = QMessageBox(self.iface.mainWindow())
@@ -256,7 +256,7 @@ def interpolate_from_times(times, coords, levels, rev_coords=False):
     else:
         x = coords[..., 1]
         y = coords[..., 0]
-    xi, yi = np.mgrid[np.nanmin(x):np.nanmax(x):100j, np.nanmin(y):np.nanmax(y):100j]
+    xi, yi = np.mgrid[np.nanmin(x):np.nanmax(x):50j, np.nanmin(y):np.nanmax(y):50j]
     # zi = griddata(x, y, times, xi, yi, interp='linear')
     zi = griddata(coords, times, (xi, yi), 'linear')
     print(zi.shape)

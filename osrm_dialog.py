@@ -184,19 +184,19 @@ class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
 
         self.query_url(url, self.query_done)
 
-    def query_done(self):
-        error = self.reply.error()
+    def query_done(self, reply):
+        error = reply.error()
         if error != QNetworkReply.NoError:
             # error_message = self.get_error_message(error)
             # self.message.emit(error_message, Qgis.Warning)
             QgsMessageLog.logMessage(
                 'OSRM-plugin error report :\n {}'.format(error),
                 level=Qgis.Warning)
-            self.reply.deleteLater()
-            self.reply = None
+            reply.deleteLater()
+            reply = None
             return
 
-        response_text = self.reply.readAll().data().decode('utf-8')
+        response_text = reply.readAll().data().decode('utf-8')
         try:
             self.parsed = json.loads(response_text)
             assert 'code' in self.parsed
@@ -207,8 +207,8 @@ class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
             self.display_error(err, 1)
             return
         finally:
-            self.reply.deleteLater()
-            self.reply = None
+            reply.deleteLater()
+            reply = None
 
         if 'Ok' not in self.parsed['code']:
             self.display_error(self.parsed['code'], 1)
@@ -343,21 +343,21 @@ class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog, BaseOsrm):
 
         self.query_url(query, self.query_done)
 
-    def query_done(self):
-        error = self.reply.error()
+    def query_done(self, reply):
+        error = reply.error()
         if error != QNetworkReply.NoError:
             try:
-                response_text = self.reply.readAll().data().decode('utf-8')
+                response_text = reply.readAll().data().decode('utf-8')
                 parsed = json.loads(response_text)
                 assert 'message' in parsed
                 self.display_error(parsed['message'], 1)
             except:
                 self.display_error(error, 1)
-            self.reply.deleteLater()
-            self.reply = None
+            reply.deleteLater()
+            reply = None
             return
 
-        response_text = self.reply.readAll().data().decode('utf-8')
+        response_text = reply.readAll().data().decode('utf-8')
         try:
             self.parsed = json.loads(response_text)
             assert "code" in self.parsed
@@ -368,8 +368,8 @@ class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog, BaseOsrm):
             self.display_error(err, 1)
             return
         finally:
-            self.reply.deleteLater()
-            self.reply = None
+            reply.deleteLater()
+            reply = None
 
         if 'Ok' not in self.parsed['code']:
             self.display_error(self.parsed['code'], 1)
@@ -583,7 +583,7 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
                 self.interval_time)][:nb_inter])
 
         self.make_prog_bar()
-        self.max_points = 500 if len(pts) == 1 else 300
+        self.max_points = 900 if len(pts) == 1 else 700
         self.polygons = []
 
         self.pts = [{
@@ -640,21 +640,21 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
             # times, origin_pt, snapped_dest_coords = \
             #     fetch_table(url, [point], coords_grid)
 
-    def query_done(self):
-        error = self.reply.error()
+    def query_done(self, reply):
+        error = reply.error()
         if error != QNetworkReply.NoError:
             try:
-                response_text = self.reply.readAll().data().decode('utf-8')
+                response_text = reply.readAll().data().decode('utf-8')
                 parsed = json.loads(response_text)
                 assert 'message' in parsed
                 self.display_error(parsed['message'], 1)
             except:
                 self.display_error(error, 1)
-            self.reply.deleteLater()
-            self.reply = None
+            reply.deleteLater()
+            reply = None
             return
 
-        response_text = self.reply.readAll().data().decode('utf-8')
+        response_text = reply.readAll().data().decode('utf-8')
         try:
             self.parsed = json.loads(response_text)
             assert "code" in self.parsed
@@ -665,8 +665,8 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
             self.display_error(err, 1)
             return
         finally:
-            self.reply.deleteLater()
-            self.reply = None
+            reply.deleteLater()
+            reply = None
 
         if 'Ok' not in self.parsed['code']:
             self.display_error(self.parsed['code'], 1)
