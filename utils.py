@@ -165,6 +165,22 @@ def prepare_route_symbol(nb_route):
     return my_symb
 
 
+def put_layer_on_top(id_new_layer_top):
+    root = QgsProject.instance().layerTreeRoot()
+
+    old_top_layer = root.children()[0]
+    if old_top_layer.layerId() == id_new_layer_top:
+        return
+
+    old_top_layer_clone = old_top_layer.clone()
+    my_layer = root.findLayer(id_new_layer_top)
+    my_clone = my_layer.clone()
+    root.removeChildNode(old_top_layer)
+    root.insertChildNode(0, my_clone)
+    root.removeChildNode(my_layer)
+    root.insertChildNode(1, old_top_layer_clone)
+
+
 def _chain(*lists):
     for li in lists:
         for elem in li:
@@ -297,8 +313,8 @@ def interpolate_from_times(times, coords, levels):
     x = coords[..., 0]
     y = coords[..., 1]
     xi, yi = np.mgrid[
-        np.nanmin(x):np.nanmax(x):60j,
-        np.nanmin(y):np.nanmax(y):60j,
+        np.nanmin(x):np.nanmax(x):120j,
+        np.nanmin(y):np.nanmax(y):120j,
     ]
     zi = griddata(coords, times, (xi, yi), 'linear')
     collec_poly = contourf(

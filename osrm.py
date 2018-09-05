@@ -72,7 +72,7 @@ class OsrmTools:
         self.dlg_route = OsrmRouteDialog(self.iface)
         self.dlg_access = OsrmAccessDialog(self.iface)
         self.dlg_table = OsrmTableDialog(self.iface)
-        self.dlg_batchroute = OsrmBatchRouteDialog()
+        self.dlg_batchroute = OsrmBatchRouteDialog(self.iface)
 
         # Declare instance attributes
         self.actions = []

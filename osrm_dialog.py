@@ -35,7 +35,8 @@ from qgis.core import (
     Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsFeature,
     QgsFillSymbol, QgsGeometry, QgsGraduatedSymbolRenderer, QgsLogger,
     QgsMapLayerProxyModel, QgsMessageLog, QgsPointXY, QgsProject,
-    QgsRendererRange, QgsSingleSymbolRenderer, QgsSymbol, QgsVectorLayer)
+    QgsRendererRange, QgsSingleSymbolRenderer, QgsSymbol, QgsVectorFileWriter,
+    QgsVectorLayer)
 from qgis.gui import QgsMapToolEmitPoint
 
 
@@ -43,7 +44,8 @@ from .utils import (
     _chain, BaseOsrm, check_host, check_profile_name, decode_geom,
     encode_to_polyline, get_coords_ids, get_isochrones_colors,
     get_search_frame, interpolate_from_times, make_regular_points,
-    qgsgeom_from_mpl_collec, prepare_route_symbol, save_dialog)
+    qgsgeom_from_mpl_collec, prepare_route_symbol, put_layer_on_top,
+    save_dialog)
 
 from .osrm_route_dialogUi import Ui_OsrmRouteDialog
 from .osrm_table_dialogUi import Ui_OsrmTableDialog
@@ -69,9 +71,9 @@ class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
 
     def store_intermediate(self, point):
         if '4326' not in self.canvas.mapSettings().destinationCrs().authid():
-            crsSrc = self.canvas.mapSettings().destinationCrs()
+            # Convert coordinates from canvas crs to EPSG:4326 crs :
             xform = QgsCoordinateTransform(
-                crsSrc,
+                self.canvas.mapSettings().destinationCrs(),
                 QgsCoordinateReferenceSystem(4326),
                 QgsProject.instance())
             point = xform.transform(point)
@@ -82,9 +84,9 @@ class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
 
     def store_destination(self, point):
         if '4326' not in self.canvas.mapSettings().destinationCrs().authid():
-            crsSrc = self.canvas.mapSettings().destinationCrs()
+            # Convert coordinates from canvas crs to EPSG:4326 crs :
             xform = QgsCoordinateTransform(
-                crsSrc,
+                self.canvas.mapSettings().destinationCrs(),
                 QgsCoordinateReferenceSystem(4326),
                 QgsProject.instance())
             point = xform.transform(point)
@@ -111,10 +113,9 @@ class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
 
     def reverse_OD(self):
         try:
-            tmp = self.lineEdit_xyO.text()
-            tmp1 = self.lineEdit_xyD.text()
-            self.lineEdit_xyD.setText(str(tmp))
-            self.lineEdit_xyO.setText(str(tmp1))
+            tmp = self.lineEdit_xyD.text()
+            self.lineEdit_xyD.setText(str(self.lineEdit_xyO.text()))
+            self.lineEdit_xyO.setText(str(tmp))
         except Exception as err:
             print(err)
 
@@ -124,8 +125,7 @@ class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
         self.lineEdit_xyI.setText('')
         self.intermediate = []
         for layer in QgsProject.instance().mapLayers():
-            if 'route_osrm' in layer or 'markers_osrm' in layer:
-                    # or 'instruction_osrm' in layer \
+            if 'route_osrm' in layer:
                 QgsProject.instance().removeMapLayer(layer)
         self.nb_route = 0
 
@@ -214,14 +214,13 @@ class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
         fet.setAttributes([0, self.parsed['routes'][0]['duration'],
                            self.parsed['routes'][0]['distance']])
         provider.addFeatures([fet])
-        # OD_layer = self.make_OD_markers(self.nb_route, xo, yo, xd, yd, interm)
-        # QgsProject.instance().addMapLayer(OD_layer)
 
         osrm_route_layer.updateExtents()
         QgsProject.instance().addMapLayer(osrm_route_layer)
+        put_layer_on_top(osrm_route_layer.id())
         self.iface.setActiveLayer(osrm_route_layer)
         self.iface.zoomToActiveLayer()
-        # put_on_top(OD_layer.id(), osrm_route_layer.id())
+        # put_layer_on_top(OD_layer.id(), osrm_route_layer.id())
 #        if self.checkBox_instruction.isChecked():
 #            pr_instruct, instruct_layer = self.prep_instruction()
 #            QgsMapLayerRegistry.instance().addMapLayer(instruct_layer)
@@ -498,7 +497,7 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
         center_pt_layer.setRenderer(QgsSingleSymbolRenderer(my_symb))
         features = []
         for nb, pt in enumerate(self.pts):
-            xo, yo = pt["point"]
+            xo, yo = pt
             fet = QgsFeature()
             fet.setGeometry(QgsGeometry.fromPointXY(
                 QgsPointXY(float(xo), float(yo))))
@@ -506,6 +505,7 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
             features.append(fet)
         center_pt_layer.dataProvider().addFeatures(features)
         QgsProject.instance().addMapLayer(center_pt_layer)
+        put_layer_on_top(center_pt_layer.id())
 
     def get_access_isochrones(self):
         """
@@ -537,6 +537,11 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
         if not pts:
             return
 
+        self.make_prog_bar()
+        self.polygons = []
+        self.pts = pts
+
+        nb_points = 1900 if len(pts) == 1 else 1300
         max_time = self.spinBox_max.value()
         self.interval_time = self.spinBox_intervall.value()
         nb_inter = int(round(max_time / self.interval_time)) + 1
@@ -544,38 +549,34 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
                 0, int(max_time + 1) + self.interval_time,
                 self.interval_time)][:nb_inter])
 
-        self.make_prog_bar()
-        self.max_points = 1100 if len(pts) == 1 else 800
-        self.polygons = []
-
-        self.pts = [{
-            "levels": self.levels,
-            "host": self.host,
-            "max": max_time,
-            "max_points": self.max_points,
-            "point": pt,
-            "profile": self.profile,
-            } for pt in pts]
+        # self.pts = [{
+        #     "levels": self.levels,
+        #     "host": self.host,
+        #     "max": max_time,
+        #     "max_points": nb_points,
+        #     "point": pt,
+        #     "profile": self.profile,
+        #     } for pt in pts]
 
         self.polygons = []
         self.total_query = len(pts)
         self.done = 0
-        for time_param in self.pts:
-            point = time_param['point']
-            max_time = time_param['max']
-            levels = time_param["levels"]
+        for point in self.pts:
+            # point = time_param['point']
+            # max_time = time_param['max']
 
-            bounds = get_search_frame(point, max_time)
-            coords_grid = make_regular_points(bounds, time_param["max_points"])
+            coords_grid = make_regular_points(
+                get_search_frame(point, max_time),
+                nb_points)
 
             src_end = 1
             dest_end = src_end + len(coords_grid)
 
             base_url = ''.join([
                 "http://",
-                time_param["host"],
+                self.host,
                 '/table/',
-                time_param["profile"],
+                self.profile,
                 '/'])
             url = ''.join([
                 base_url,
@@ -591,8 +592,6 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
 
             self.query_url(url, self.query_done)
 
-            # times, origin_pt, snapped_dest_coords = \
-            #     fetch_table(url, [point], coords_grid)
 
     def query_done(self, result):
         if 'error' in result:
@@ -600,15 +599,15 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
             return
 
         parsed = result['value']
-        times = np.array(parsed['durations'], dtype=float)
-        # new_src_coords = [ft["location"] for ft in self.parsed["sources"]]
+        durations = np.array(parsed['durations'], dtype=float)
+        # new_src_coords = [ft["location"] for ft in parsed["sources"]][0]
         snapped_dest_coords = [
             ft['location'] for ft in parsed['destinations']]
-        times = (times[0] / 60.0).round(2)  # Round values in minutes
+        durations = (durations[0] / 60.0).round(2)  # Round values in minutes
 
         # Fetch MatPlotLib polygons from a griddata interpolation
         collec_poly = interpolate_from_times(
-            times, np.array(snapped_dest_coords), self.levels)
+            durations, np.array(snapped_dest_coords), self.levels)
 
         # Convert MatPlotLib polygons to QgsGeometry polygons :
         polygons = qgsgeom_from_mpl_collec(collec_poly.collections)
@@ -655,7 +654,6 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
                 [i, levels[i] - self.interval_time, levels[i]])
             features.append(ft)
         data_provider.addFeatures(features[::-1])
-        self.nb_isocr += 1
         self.progress.setValue(9.5)
 
         # Render the value :
@@ -665,9 +663,10 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
         # isochrone_layer.setLayerTransparency(25)
         self.iface.messageBar().clearWidgets()
         QgsProject.instance().addMapLayer(isochrone_layer)
-
+        put_layer_on_top(isochrone_layer.id())
         self.add_final_pts()
         self.iface.setActiveLayer(isochrone_layer)
+        self.nb_isocr += 1
 
     @staticmethod
     def prepare_renderer(levels, inter_time, lenpoly):
@@ -682,13 +681,102 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
         for ix, cat in enumerate(cats):
             symbol = QgsFillSymbol()
             symbol.setColor(QColor(colors[ix]))
-            rng = QgsRendererRange(cat[1], cat[2], symbol, cat[0])
-            ranges.append(rng)
+            ranges.append(QgsRendererRange(cat[1], cat[2], symbol, cat[0]))
         return QgsGraduatedSymbolRenderer('max', ranges)
 
 
 class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog):
-    def __init__(self, parent=None):
+    def __init__(self, iface, parent=None):
         """Constructor."""
         super(OsrmBatchRouteDialog, self).__init__(parent)
         self.setupUi(self)
+        self.iface = iface
+        self.ComboBoxOrigin.setFilters(QgsMapLayerProxyModel.PointLayer)
+        self.ComboBoxDestination.setFilters(QgsMapLayerProxyModel.PointLayer)
+        self.pushButtonReverse.clicked.connect(self.reverse_OD)
+        # self.pushButtonBrowse.clicked.connect(self.output_dialog_geo)
+        # self.pushButtonRun.clicked.connect(self.get_batch_route)
+        # self.comboBox_host.activated[str].connect(self.add_host)
+
+    def reverse_OD(self):
+        """ Switch the Origin and the Destination layer"""
+        try:
+            tmp_o = self.ComboBoxOrigin.currentLayer()
+            tmp_d = self.ComboBoxDestination.currentLayer()
+            self.ComboBoxOrigin.setLayer(tmp_d)
+            self.ComboBoxDestination.setLayer(tmp_o)
+        except Exception as err:
+            QgsMessageLog.logMessage(
+                'OSRM-plugin error report :\n {}'.format(err),
+                level=Qgis.Warning)
+
+    def _prepare_queries(self):
+        """Get the coordinates for each viaroute to query"""
+        if self.ComboBoxOrigin.isEnabled():
+            origin_layer = self.ComboBoxOrigin.currentLayer()
+            destination_layer = self.ComboBoxDestination.currentLayer()
+            if '4326' not in origin_layer.crs().authid():
+                xform = QgsCoordinateTransform(
+                    origin_layer.crs(),
+                    QgsCoordinateReferenceSystem(4326),
+                    QgsProject.instance())
+                origin_ids_coords = \
+                    [(ft.id(), xform.transform(ft.geometry().asPoint()))
+                     for ft in origin_layer.getFeatures()]
+            else:
+                origin_ids_coords = \
+                    [(ft.id(), ft.geometry().asPoint())
+                     for ft in origin_layer.getFeatures()]
+
+            if '4326' not in destination_layer.crs().authid():
+                xform = QgsCoordinateTransform(
+                    origin_layer.crs(),
+                    QgsCoordinateReferenceSystem(4326),
+                    QgsProject.instance())
+                destination_ids_coords = \
+                    [(ft.id(), xform.transform(ft.geometry().asPoint()))
+                     for ft in destination_layer.getFeatures()]
+            else:
+                destination_ids_coords = \
+                    [(ft.id(), ft.geometry().asPoint())
+                     for ft in destination_layer.getFeatures()]
+
+            return [(origin[1][1], origin[1][0], dest[1][1], dest[1][0])
+                    for origin in origin_ids_coords
+                    for dest in destination_ids_coords]
+
+    def return_batch_route(self, features):
+        """Save and/or display the routes retrieved"""
+        osrm_batch_route_layer = QgsVectorLayer(
+            "Linestring?crs=epsg:4326&field=id:integer"
+            "&field=total_time:integer(20)&field=distance:integer(20)",
+            "routes_osrm{}".format(self.nb_done), "memory")
+        provider = osrm_batch_route_layer.dataProvider()
+        provider.addFeatures(features)
+
+        if self.filename:
+            error = QgsVectorFileWriter.writeAsVectorFormat(
+                osrm_batch_route_layer, self.filename,
+                self.encoding, None, "ESRI Shapefile")
+            if error != QgsVectorFileWriter.NoError:
+                self.iface.messageBar().pushMessage(
+                    "Error",
+                    "Can't save the result into {} - Output have been "
+                    "added to the canvas (see QGis log for error trace"
+                    "back)".format(self.filename), duration=10)
+                QgsMessageLog.logMessage(
+                    'OSRM-plugin error report :\n {}'.format(error),
+                    level=Qgis.Warning)
+                QgsProject.instance().addMapLayer(osrm_batch_route_layer)
+                self.iface.setActiveLayer(osrm_batch_route_layer)
+                return -1
+            else:
+                QtWidgets.QMessageBox.information(
+                    self.iface.mainWindow(), 'Info',
+                    "Result saved in {}".format(self.filename))
+        if self.check_add_layer.isChecked():
+            self.iface.setActiveLayer(osrm_batch_route_layer)
+        else:
+            QgsProject.instance().removeMapLayer(
+                osrm_batch_route_layer.id())
+        self.iface.messageBar().clearWidgets()
