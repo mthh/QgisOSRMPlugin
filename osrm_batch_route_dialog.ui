@@ -250,25 +250,6 @@
       </property>
      </widget>
     </item>
-    <item row="0" column="1" colspan="2">
-     <widget class="QComboBox" name="comboBox_host">
-      <item>
-       <property name="text">
-        <string>http://127.0.0.1:5000/</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>http://router.project-osrm.org/</string>
-       </property>
-      </item>
-      <item>
-       <property name="text">
-        <string>Add an url...</string>
-       </property>
-      </item>
-     </widget>
-    </item>
     <item row="2" column="1">
      <spacer name="verticalSpacer">
       <property name="orientation">
@@ -281,6 +262,13 @@
        </size>
       </property>
      </spacer>
+    </item>
+    <item row="0" column="1" colspan="2">
+     <widget class="QLineEdit" name="lineEdit_host">
+      <property name="text">
+       <string>http://127.0.0.1:5000/</string>
+      </property>
+     </widget>
     </item>
    </layout>
   </widget>

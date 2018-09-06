@@ -65,7 +65,7 @@ class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
         self.destinationEmit = QgsMapToolEmitPoint(self.canvas)
         self.nb_route = 0
         self.intermediate = []
-        self.pushButtonTryIt.clicked.connect(self.get_route)
+        self.pushButtonTryIt.clicked.connect(self.do_work)
         self.pushButtonReverse.clicked.connect(self.reverse_OD)
         self.pushButtonClear.clicked.connect(self.clear_all_single)
 
@@ -129,7 +129,7 @@ class OsrmRouteDialog(QtWidgets.QDialog, Ui_OsrmRouteDialog, BaseOsrm):
                 QgsProject.instance().removeMapLayer(layer)
         self.nb_route = 0
 
-    def get_route(self):
+    def do_work(self):
         """
         Main method to prepare the request and display the result on the
         QGIS canvas.
@@ -259,7 +259,7 @@ class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog, BaseOsrm):
             lambda x: self.comboBox_idfield_2.setLayer(x)
             )
         self.pushButton_browse.clicked.connect(self.output_dialog)
-        self.pushButton_fetch.clicked.connect(self.get_table)
+        self.pushButton_fetch.clicked.connect(self.do_work)
 
     def output_dialog(self):
         self.lineEdit_output.clear()
@@ -268,7 +268,7 @@ class OsrmTableDialog(QtWidgets.QDialog, Ui_OsrmTableDialog, BaseOsrm):
             return
         self.lineEdit_output.setText(self.filename)
 
-    def get_table(self):
+    def do_work(self):
         """
         Main method to prepare the query and fecth the table to a .csv file
         """
@@ -401,7 +401,7 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
         self.intermediateEmit = QgsMapToolEmitPoint(self.canvas)
         self.comboBox_pointlayer.setFilters(QgsMapLayerProxyModel.PointLayer)
         self.comboBox_method.activated[str].connect(self.enable_functionnality)
-        self.pushButton_fetch.clicked.connect(self.get_access_isochrones)
+        self.pushButton_fetch.clicked.connect(self.do_work)
         self.pushButtonClear.clicked.connect(self.clear_all_isochrone)
         self.lineEdit_xyO.textChanged.connect(self.change_nb_center)
         self.nb_isocr = 0
@@ -507,7 +507,7 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
         QgsProject.instance().addMapLayer(center_pt_layer)
         put_layer_on_top(center_pt_layer.id())
 
-    def get_access_isochrones(self):
+    def do_work(self):
         """
         Making the accessibility isochrones in few steps:
         - make a grid of points aroung the origin point,
@@ -685,7 +685,7 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
         return QgsGraduatedSymbolRenderer('max', ranges)
 
 
-class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog):
+class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog, BaseOsrm):
     def __init__(self, iface, parent=None):
         """Constructor."""
         super(OsrmBatchRouteDialog, self).__init__(parent)
@@ -695,7 +695,7 @@ class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog):
         self.ComboBoxDestination.setFilters(QgsMapLayerProxyModel.PointLayer)
         self.pushButtonReverse.clicked.connect(self.reverse_OD)
         # self.pushButtonBrowse.clicked.connect(self.output_dialog_geo)
-        # self.pushButtonRun.clicked.connect(self.get_batch_route)
+        self.pushButtonRun.clicked.connect(self.do_work)
         # self.comboBox_host.activated[str].connect(self.add_host)
 
     def reverse_OD(self):
@@ -710,49 +710,101 @@ class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog):
                 'OSRM-plugin error report :\n {}'.format(err),
                 level=Qgis.Warning)
 
+    def do_work(self):
+        try:
+            self.host = check_host(self.lineEdit_host.text())
+            self.profile = check_profile_name(self.lineEdit_profileName.text())
+        except (ValueError, AssertionError) as err:
+            print(err)
+            self.iface.messageBar().pushMessage(
+                "Error",
+                "Please provide a valid non-empty URL and profile name",
+                duration=10)
+            return
+        self.nb_routes_done, self.errors, self.consecutive_errors = 0, 0, 0
+        self.features = []
+        queries = self._prepare_queries()
+        self.nb_queries = len(queries)
+        urls = []
+        self.make_prog_bar()
+        for yo, xo, yd, xd in queries:
+            urls.append(''.join([
+                'http://',
+                self.host,
+                '/route/',
+                self.profile,
+                '/',
+                '{},{};{},{}'.format(xo, yo, xd, yd),
+                '?overview=full',
+                '&steps=false',
+                '&alternatives=false',
+            ]))
+        for ix, url in enumerate(urls):
+            self.nb_queries -= 1
+            self.query_url(url, self.query_done)
+
+    def query_done(self, result):
+        if 'error' in result:
+            self.display_error(result['error'], 1)
+            self.errors += 1
+            self.consecutive_errors += 1
+            return
+        self.consecutive_errors = 0
+        parsed = result['value']
+        line_geom = decode_geom(parsed['routes'][0]['geometry'])
+        ft = QgsFeature()
+        ft.setGeometry(line_geom)
+        ft.setAttributes([
+            self.nb_routes_done,
+            parsed['routes'][0]['duration'],
+            parsed['routes'][0]['distance'],
+        ])
+        self.features.append(ft)
+        self.nb_routes_done += 1
+        if self.nb_queries == 0:
+            self.return_batch_route()
+
     def _prepare_queries(self):
         """Get the coordinates for each viaroute to query"""
-        if self.ComboBoxOrigin.isEnabled():
-            origin_layer = self.ComboBoxOrigin.currentLayer()
-            destination_layer = self.ComboBoxDestination.currentLayer()
-            if '4326' not in origin_layer.crs().authid():
-                xform = QgsCoordinateTransform(
-                    origin_layer.crs(),
-                    QgsCoordinateReferenceSystem(4326),
-                    QgsProject.instance())
-                origin_ids_coords = \
-                    [(ft.id(), xform.transform(ft.geometry().asPoint()))
-                     for ft in origin_layer.getFeatures()]
-            else:
-                origin_ids_coords = \
-                    [(ft.id(), ft.geometry().asPoint())
-                     for ft in origin_layer.getFeatures()]
+        origin_layer = self.ComboBoxOrigin.currentLayer()
+        destination_layer = self.ComboBoxDestination.currentLayer()
+        if '4326' not in origin_layer.crs().authid():
+            xform = QgsCoordinateTransform(
+                origin_layer.crs(),
+                QgsCoordinateReferenceSystem(4326),
+                QgsProject.instance())
+            origin_ids_coords = \
+                [(ft.id(), xform.transform(ft.geometry().asPoint()))
+                 for ft in origin_layer.getFeatures()]
+        else:
+            origin_ids_coords = \
+                [(ft.id(), ft.geometry().asPoint())
+                 for ft in origin_layer.getFeatures()]
 
-            if '4326' not in destination_layer.crs().authid():
-                xform = QgsCoordinateTransform(
-                    origin_layer.crs(),
-                    QgsCoordinateReferenceSystem(4326),
-                    QgsProject.instance())
-                destination_ids_coords = \
-                    [(ft.id(), xform.transform(ft.geometry().asPoint()))
-                     for ft in destination_layer.getFeatures()]
-            else:
-                destination_ids_coords = \
-                    [(ft.id(), ft.geometry().asPoint())
-                     for ft in destination_layer.getFeatures()]
+        if '4326' not in destination_layer.crs().authid():
+            xform = QgsCoordinateTransform(
+                origin_layer.crs(),
+                QgsCoordinateReferenceSystem(4326),
+                QgsProject.instance())
+            destination_ids_coords = \
+                [(ft.id(), xform.transform(ft.geometry().asPoint()))
+                 for ft in destination_layer.getFeatures()]
+        else:
+            destination_ids_coords = \
+                [(ft.id(), ft.geometry().asPoint())
+                 for ft in destination_layer.getFeatures()]
+        return [(origin[1][1], origin[1][0], dest[1][1], dest[1][0])
+                for origin in origin_ids_coords
+                for dest in destination_ids_coords]
 
-            return [(origin[1][1], origin[1][0], dest[1][1], dest[1][0])
-                    for origin in origin_ids_coords
-                    for dest in destination_ids_coords]
-
-    def return_batch_route(self, features):
+    def return_batch_route(self):
         """Save and/or display the routes retrieved"""
         osrm_batch_route_layer = QgsVectorLayer(
             "Linestring?crs=epsg:4326&field=id:integer"
             "&field=total_time:integer(20)&field=distance:integer(20)",
-            "routes_osrm{}".format(self.nb_done), "memory")
+            "routes_osrm_{}".format(self.nb_routes_done), "memory")
         provider = osrm_batch_route_layer.dataProvider()
-        provider.addFeatures(features)
+        provider.addFeatures(self.features)
 
         if self.filename:
             error = QgsVectorFileWriter.writeAsVectorFormat(

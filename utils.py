@@ -14,7 +14,7 @@ from matplotlib.pyplot import contourf
 from scipy.interpolate import griddata
 
 
-class BaseOsrm(object):
+class BaseOsrm:
     """
     Base class to be subclassed by each OSRM dialog class.
     It contains some methods used by the five next class.
@@ -126,7 +126,6 @@ class BaseOsrm(object):
         self.lineEdit_xyO.setText(
             str(tuple(map(lambda x: round(x, 6), point))))
         self.putOnTop()
-
 
 def check_host(url):
     """
