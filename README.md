@@ -28,8 +28,7 @@ If used to request the public API you have to adhere to the [API Usage Policy](h
 
 Images of this page are displayed on OpenStreetMap tiles (© OpenStreetMap contributors) and route computations were done with Open Source Routing Machine. -->
 
-
-#### Licence and attribution
+#### Licence and attribution
 
 If the information computed by this plugin is intend to be reused, you have to properly display the source of the routes and the data licence attribution :
 
