@@ -15,7 +15,6 @@ This plug-in is in its early stage of development and the code is hosted [on git
 - Find a route
 - Get a time matrix
 - Make accessibility isochrones
-- Solve the Travelling Salesman Problem
 - Compute and export many routes
 
 
@@ -23,11 +22,11 @@ This plug-in is in its early stage of development and the code is hosted [on git
 
 This plug-in is primarily aimed to be used on a local instance of OSRM.
 
-If used to request the public API you have to adhere to the (API Usage Policy)[https://github.com/Project-OSRM/osrm-backend/wiki/Api-usage-policy] (which include no heavy usage, like computing many `/viaroute` with this plug-in)
+If used to request the public API you have to adhere to the [API Usage Policy](https://github.com/Project-OSRM/osrm-backend/wiki/Api-usage-policy) (which include no heavy usage, like computing many `/viaroute` with this plug-in)
 
-#### Example
+<!-- #### Example
 
-Images of this page are displayed on OpenStreetMap tiles (© OpenStreetMap contributors) and route computations were done with Open Source Routing Machine.
+Images of this page are displayed on OpenStreetMap tiles (© OpenStreetMap contributors) and route computations were done with Open Source Routing Machine. -->
 
 
 #### Licence and attribution
