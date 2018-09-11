@@ -45,7 +45,7 @@ from .utils import (
     encode_to_polyline, get_coords_ids, get_isochrones_colors,
     get_search_frame, interpolate_from_times, make_regular_points,
     qgsgeom_from_mpl_collec, prepare_route_symbol, put_layer_on_top,
-    save_dialog)
+    save_dialog, save_dialog_geo)
 
 from .osrm_route_dialogUi import Ui_OsrmRouteDialog
 from .osrm_table_dialogUi import Ui_OsrmTableDialog
@@ -541,7 +541,7 @@ class OsrmAccessDialog(QtWidgets.QDialog, Ui_OsrmAccessDialog, BaseOsrm):
         self.polygons = []
         self.pts = pts
 
-        nb_points = 1900 if len(pts) == 1 else 1300
+        nb_points = 4000 if len(pts) == 1 else 2300
         max_time = self.spinBox_max.value()
         self.interval_time = self.spinBox_intervall.value()
         nb_inter = int(round(max_time / self.interval_time)) + 1
@@ -691,12 +691,12 @@ class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog, BaseOsrm)
         super(OsrmBatchRouteDialog, self).__init__(parent)
         self.setupUi(self)
         self.iface = iface
+        self.filename = None
         self.ComboBoxOrigin.setFilters(QgsMapLayerProxyModel.PointLayer)
         self.ComboBoxDestination.setFilters(QgsMapLayerProxyModel.PointLayer)
         self.pushButtonReverse.clicked.connect(self.reverse_OD)
-        # self.pushButtonBrowse.clicked.connect(self.output_dialog_geo)
+        self.pushButtonBrowse.clicked.connect(self.output_dialog_geo)
         self.pushButtonRun.clicked.connect(self.do_work)
-        # self.comboBox_host.activated[str].connect(self.add_host)
 
     def reverse_OD(self):
         """ Switch the Origin and the Destination layer"""
@@ -710,6 +710,13 @@ class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog, BaseOsrm)
                 'OSRM-plugin error report :\n {}'.format(err),
                 level=Qgis.Warning)
 
+    def output_dialog_geo(self):
+        self.lineEdit_output.clear()
+        self.filename, self.encoding = save_dialog_geo()
+        if self.filename is None:
+            return
+        self.lineEdit_output.setText(self.filename)
+
     def do_work(self):
         try:
             self.host = check_host(self.lineEdit_host.text())
@@ -721,26 +728,13 @@ class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog, BaseOsrm)
                 "Please provide a valid non-empty URL and profile name",
                 duration=10)
             return
+        self.filename = self.lineEdit_output.text()
         self.nb_routes_done, self.errors, self.consecutive_errors = 0, 0, 0
         self.features = []
-        queries = self._prepare_queries()
-        self.nb_queries = len(queries)
-        urls = []
+        urls = self._prepare_queries()
+        self.nb_queries = len(urls)
         self.make_prog_bar()
-        for yo, xo, yd, xd in queries:
-            urls.append(''.join([
-                'http://',
-                self.host,
-                '/route/',
-                self.profile,
-                '/',
-                '{},{};{},{}'.format(xo, yo, xd, yd),
-                '?overview=full',
-                '&steps=false',
-                '&alternatives=false',
-            ]))
         for ix, url in enumerate(urls):
-            self.nb_queries -= 1
             self.query_url(url, self.query_done)
 
     def query_done(self, result):
@@ -761,7 +755,7 @@ class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog, BaseOsrm)
         ])
         self.features.append(ft)
         self.nb_routes_done += 1
-        if self.nb_queries == 0:
+        if len(self.features) + self.errors == self.nb_queries:
             self.return_batch_route()
 
     def _prepare_queries(self):
@@ -793,9 +787,27 @@ class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog, BaseOsrm)
             destination_ids_coords = \
                 [(ft.id(), ft.geometry().asPoint())
                  for ft in destination_layer.getFeatures()]
-        return [(origin[1][1], origin[1][0], dest[1][1], dest[1][0])
-                for origin in origin_ids_coords
-                for dest in destination_ids_coords]
+        coords = [
+            (origin[1][1], origin[1][0], dest[1][1], dest[1][0])
+            for origin in origin_ids_coords
+            for dest in destination_ids_coords
+        ]
+        urls = []
+        for yo, xo, yd, xd in coords:
+            if yo == yd and xo == xd:
+                continue
+            urls.append(''.join([
+                'http://',
+                self.host,
+                '/route/',
+                self.profile,
+                '/',
+                '{},{};{},{}'.format(xo, yo, xd, yd),
+                '?overview=full',
+                '&steps=false',
+                '&alternatives=false',
+            ]))
+        return urls
 
     def return_batch_route(self):
         """Save and/or display the routes retrieved"""
@@ -808,8 +820,11 @@ class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog, BaseOsrm)
 
         if self.filename:
             error = QgsVectorFileWriter.writeAsVectorFormat(
-                osrm_batch_route_layer, self.filename,
-                self.encoding, None, "ESRI Shapefile")
+                osrm_batch_route_layer,
+                self.filename,
+                self.encoding,
+                QgsCoordinateReferenceSystem(4326),
+                'ESRI Shapefile')
             if error != QgsVectorFileWriter.NoError:
                 self.iface.messageBar().pushMessage(
                     "Error",
@@ -827,8 +842,7 @@ class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog, BaseOsrm)
                     self.iface.mainWindow(), 'Info',
                     "Result saved in {}".format(self.filename))
         if self.check_add_layer.isChecked():
+            QgsProject.instance().addMapLayer(osrm_batch_route_layer)
             self.iface.setActiveLayer(osrm_batch_route_layer)
-        else:
-            QgsProject.instance().removeMapLayer(
-                osrm_batch_route_layer.id())
+
         self.iface.messageBar().clearWidgets()

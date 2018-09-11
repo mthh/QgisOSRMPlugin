@@ -233,10 +233,11 @@ class OsrmTools:
 
         # Run the dialog event loop
         result = self.dlg_route.exec_()
+        self.canvas.unsetMapTool(self.dlg_route.originEmit)
+        self.canvas.unsetMapTool(self.dlg_route.intermediateEmit)
+        self.canvas.unsetMapTool(self.dlg_route.destinationEmit)
         # See if OK was pressed
         if result:
-            # Do something useful here - delete the line containing pass and
-            # substitute with your code.
             pass
 
     def run_table(self):
@@ -247,8 +248,6 @@ class OsrmTools:
         result = self.dlg_table.exec_()
         # See if OK was pressed
         if result:
-            # Do something useful here - delete the line containing pass and
-            # substitute with your code.
             pass
 
     def run_accessibility(self):
@@ -265,10 +264,11 @@ class OsrmTools:
             lambda _: self.canvas.setMapTool(self.dlg_access.intermediateEmit))
         # Run the dialog event loop
         result = self.dlg_access.exec_()
+        self.canvas.unsetMapTool(self.dlg_access.originEmit)
+        self.canvas.unsetMapTool(self.dlg_access.intermediateEmit)
+
         # See if OK was pressed
         if result:
-            # Do something useful here - delete the line containing pass and
-            # substitute with your code.
             pass
 
     def run_batchroute(self):
@@ -279,6 +279,4 @@ class OsrmTools:
         result = self.dlg_batchroute.exec_()
         # See if OK was pressed
         if result:
-            # Do something useful here - delete the line containing pass and
-            # substitute with your code.
             pass

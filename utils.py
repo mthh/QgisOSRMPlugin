@@ -255,6 +255,26 @@ def save_dialog(filtering="CSV (*.csv *.CSV)"):
     return (files[0], fileDialog.encoding())
 
 
+def save_dialog_geo(filtering='ESRI Shapefile (*.shp *.SHP)'):
+    settings = QSettings()
+    dirName = settings.value("/UI/lastShapefileDir")
+    encode = settings.value("/UI/encoding")
+    fileDialog = QgsEncodingFileDialog(
+        None, "Save as ...", dirName, filtering, encode
+        )
+    fileDialog.setDefaultSuffix('shp')
+    fileDialog.setFileMode(QFileDialog.AnyFile)
+    fileDialog.setAcceptMode(QFileDialog.AcceptSave)
+    # fileDialog.setConfirmOverwrite(True)
+    if not fileDialog.exec_() == QDialog.Accepted:
+        return None, None
+    files = fileDialog.selectedFiles()
+    settings.setValue(
+        "/UI/lastShapefileDir",
+        QFileInfo(files[0]).absolutePath())
+    return (files[0], fileDialog.encoding())
+
+
 def get_coords_ids(layer, field, on_selected=False):
     if on_selected:
         get_features_method = layer.selectedFeatures
@@ -312,8 +332,8 @@ def interpolate_from_times(times, coords, levels):
     x = coords[..., 0]
     y = coords[..., 1]
     xi, yi = np.mgrid[
-        np.nanmin(x):np.nanmax(x):120j,
-        np.nanmin(y):np.nanmax(y):120j,
+        np.nanmin(x):np.nanmax(x):130j,
+        np.nanmin(y):np.nanmax(y):130j,
     ]
     zi = griddata(coords, times, (xi, yi), 'linear')
     collec_poly = contourf(
