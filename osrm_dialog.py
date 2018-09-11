@@ -33,8 +33,8 @@ from PyQt5.QtGui import QColor
 from PyQt5.QtNetwork import QNetworkReply
 from qgis.core import (
     Qgis, QgsCoordinateReferenceSystem, QgsCoordinateTransform, QgsFeature,
-    QgsFillSymbol, QgsGeometry, QgsGraduatedSymbolRenderer, QgsLogger,
-    QgsMapLayerProxyModel, QgsMessageLog, QgsPointXY, QgsProject,
+    QgsFeatureSink, QgsFillSymbol, QgsGeometry, QgsGraduatedSymbolRenderer,
+    QgsLogger, QgsMapLayerProxyModel, QgsMessageLog, QgsPointXY, QgsProject,
     QgsRendererRange, QgsSingleSymbolRenderer, QgsSymbol, QgsVectorFileWriter,
     QgsVectorLayer)
 from qgis.gui import QgsMapToolEmitPoint
@@ -692,6 +692,7 @@ class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog, BaseOsrm)
         self.setupUi(self)
         self.iface = iface
         self.filename = None
+        self.encoding = None
         self.ComboBoxOrigin.setFilters(QgsMapLayerProxyModel.PointLayer)
         self.ComboBoxDestination.setFilters(QgsMapLayerProxyModel.PointLayer)
         self.pushButtonReverse.clicked.connect(self.reverse_OD)
@@ -702,8 +703,8 @@ class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog, BaseOsrm)
         """ Switch the Origin and the Destination layer"""
         try:
             tmp_o = self.ComboBoxOrigin.currentLayer()
-            tmp_d = self.ComboBoxDestination.currentLayer()
-            self.ComboBoxOrigin.setLayer(tmp_d)
+            self.ComboBoxOrigin.setLayer(
+                self.ComboBoxDestination.currentLayer())
             self.ComboBoxDestination.setLayer(tmp_o)
         except Exception as err:
             QgsMessageLog.logMessage(
@@ -729,6 +730,8 @@ class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog, BaseOsrm)
                 duration=10)
             return
         self.filename = self.lineEdit_output.text()
+        if not self.encoding or self.encoding == "System":
+            self.encoding = sys.getdefaultencoding()
         self.nb_routes_done, self.errors, self.consecutive_errors = 0, 0, 0
         self.features = []
         urls = self._prepare_queries()
@@ -815,11 +818,15 @@ class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog, BaseOsrm)
             "Linestring?crs=epsg:4326&field=id:integer"
             "&field=total_time:integer(20)&field=distance:integer(20)",
             "routes_osrm_{}".format(self.nb_routes_done), "memory")
-        provider = osrm_batch_route_layer.dataProvider()
-        provider.addFeatures(self.features)
+        osrm_batch_route_layer.startEditing()
+        osrm_batch_route_layer.setCrs(
+            QgsCoordinateReferenceSystem(4326))
+        osrm_batch_route_layer.addFeatures(
+            self.features, QgsFeatureSink.FastInsert)
+        osrm_batch_route_layer.commitChanges()
 
         if self.filename:
-            error = QgsVectorFileWriter.writeAsVectorFormat(
+            error, error_msg = QgsVectorFileWriter.writeAsVectorFormat(
                 osrm_batch_route_layer,
                 self.filename,
                 self.encoding,
@@ -832,7 +839,7 @@ class OsrmBatchRouteDialog(QtWidgets.QDialog, Ui_OsrmBatchRouteDialog, BaseOsrm)
                     "added to the canvas (see QGis log for error trace"
                     "back)".format(self.filename), duration=10)
                 QgsMessageLog.logMessage(
-                    'OSRM-plugin error report :\n {}'.format(error),
+                    'OSRM-plugin error report :\n {}'.format(error_msg),
                     level=Qgis.Warning)
                 QgsProject.instance().addMapLayer(osrm_batch_route_layer)
                 self.iface.setActiveLayer(osrm_batch_route_layer)

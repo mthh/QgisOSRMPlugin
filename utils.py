@@ -255,7 +255,22 @@ def save_dialog(filtering="CSV (*.csv *.CSV)"):
     return (files[0], fileDialog.encoding())
 
 
-def save_dialog_geo(filtering='ESRI Shapefile (*.shp *.SHP)'):
+def save_dialog_geo(filtering=None):
+    filtering = filtering or (
+        'GeoPackage (*.gpkg *.GPKG);;ESRI Shapefile (*.shp *.SHP);;'
+        'Atlas BNA (*.bna *.BNA);;AutoCAD DXF (*.dxf *.DXF);;'
+        'Geoconcept (*.gxt *.txt *.GXT *.TXT);;'
+        'Geography Markup Language [GML] (*.gml *.GML);;'
+        'GeoJSON (*.geojson *.GEOJSON);;GeoRSS (*.xml *.XML);;'
+        'GPS eXchange Format [GPX] (*.gpx *.GPX);;'
+        'INTERLIS 1 (*.itf *.xml *.ili *.ITF *.XML *.ILI);;'
+        'INTERLIS 2 (*.xtf *.xml *.ili *.XTF *.XML *.ILI);;'
+        'Keyhole Markup Language [KML] (*.kml *.KML);;'
+        'Mapinfo TAB (*.tab *.TAB);;'
+        'Microstation DGN (*.dgn *.DGN);;'
+        'S-57 Base file (*.000 *.000);;'
+        'SQLite (*.sqlite *.SQLITE)'
+    )
     settings = QSettings()
     dirName = settings.value("/UI/lastShapefileDir")
     encode = settings.value("/UI/encoding")
